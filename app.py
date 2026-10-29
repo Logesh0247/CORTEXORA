@@ -10,16 +10,22 @@ from cortexora.decision_engine.engine import stockout_recommendations, churn_rec
 from cortexora.optimization.optimize import reorder_plan, daily_demand_stats, discount_effectiveness, breakeven_units, optimize_budget
 from cortexora.analytics.experiments import ab_conversion, required_sample_size, srm_check, diff_in_diff, mmm_readiness
 from cortexora.analytics.competitor import validate_snapshots, price_gaps
+from cortexora.reports.report import generate_markdown_report
 import numpy as np
 
 st.set_page_config(page_title="CORTEXORA", layout="wide")
 if not DB_PATH.exists():
-    st.error("Database not found. Run: `python scripts/run_etl.py`"); st.stop()
+    with st.spinner("First run: building the CORTEXORA warehouse from sample data (seed=42)…"):
+        from cortexora.config import SAMPLE_DIR
+        from cortexora.data.generate_sample import generate
+        from cortexora.pipelines.etl import run as _etl_run
+        if not (SAMPLE_DIR / "orders.csv").exists(): generate(SAMPLE_DIR)
+        _etl_run(SAMPLE_DIR, DB_PATH)
 orders, items, products, inv, mkt = (load_table(t) for t in ["orders","order_items","products","inventory_snapshots","marketing_spend"])
 df = enrich(orders, items).merge(products[["product_id","category"]], on="product_id")
 
 st.sidebar.title("🧠 CORTEXORA")
-page = st.sidebar.radio("Module", ["Home / Executive Overview","Business Growth","Demand Forecasting","Pricing Simulator","Customer Intelligence","Marketing Performance","Experiments & Causal Lab","Competitor Intelligence","Decision Intelligence Engine","Data Quality & Monitoring"])
+page = st.sidebar.radio("Module", ["Home / Executive Overview","Business Growth","Demand Forecasting","Pricing & Profit Optimization","Customer Intelligence","Marketing Performance","Experiments & Causal Lab","Competitor Intelligence","Decision Intelligence Engine","Data Quality & Monitoring","Reports","Settings & About"])
 st.sidebar.warning("⚠️ Synthetic demo data (seed=42) — not real business results.")
 cats = st.sidebar.multiselect("Category", sorted(df.category.unique()), default=sorted(df.category.unique()))
 dmin, dmax = st.sidebar.date_input("Date range", [df.order_date.min().date(), df.order_date.max().date()])
@@ -60,7 +66,7 @@ elif page == "Demand Forecasting":
     st.dataframe(plan[["product_id","category","stock_on_hand","forecast_daily","lead_time_days","safety_stock","recommended_reorder_qty","estimated_order_cost","stockout_risk"]], use_container_width=True)
     st.download_button("Download reorder plan CSV", plan.to_csv(index=False), "reorder_plan.csv")
 
-elif page == "Pricing Simulator":
+elif page == "Pricing & Profit Optimization":
     st.title("Pricing & Profit — assumption-based simulator")
     st.info("Elasticity below is YOUR assumption, not an estimated causal effect. Results are scenarios, not predictions.")
     p = st.selectbox("Product", products.product_name); row = products[products.product_name==p].iloc[0]
@@ -219,6 +225,43 @@ elif page == "Decision Intelligence Engine":
     st.subheader("Decision history (audit log)")
     st.dataframe(dec, use_container_width=True)
     st.download_button("Download decision history CSV", dec.to_csv(index=False), "cortexora_decision_history.csv")
+
+elif page == "Reports":
+    st.title("Reports")
+    st.caption("The report renders computed values from the same functions as the dashboards — no hand-typed figures. Scope follows the sidebar filters.")
+    import json as _json, pathlib as _pl
+    cat_sel = st.selectbox("Forecast category in report", sorted(products.category.unique()))
+    art = _pl.Path("cortexora/models/artifacts/churn_evaluation.json")
+    churn_rep = _json.loads(art.read_text()) if art.exists() else None
+    md = generate_markdown_report(f, evaluate(weekly_series(f, cat_sel, products)), churn_rep, load_decisions(DB_PATH),
+                                  generated_for=f"Categories: {', '.join(cats)} · {dmin} → {dmax} · forecast: {cat_sel}")
+    st.markdown(md)
+    st.download_button("Download executive report (Markdown)", md, "cortexora_executive_report.md")
+    st.download_button("Download decisions CSV", load_decisions(DB_PATH).to_csv(index=False), "cortexora_decisions.csv")
+
+elif page == "Settings & About":
+    st.title("Settings & About")
+    st.markdown("## 🧠 CORTEXORA\n**The Intelligence Engine for Predictive Business Decisions**  \n*Predict the Future. Optimize the Present. Engineer Business Growth.*")
+    from cortexora import __version__
+    from cortexora.config import ROOT
+    st.write(f"Version **{__version__}** · Database: `{DB_PATH}` · Project root: `{ROOT}`")
+    st.warning("Demo configuration: synthetic data (seed=42), SQLite warehouse. For production: point CORTEXORA_DB to a persistent path/Postgres, replace the sample generator with a licensed real dataset (docs/04), and retrain models before any business use.")
+    st.subheader("Metric definitions (single source of truth — docs/03)")
+    st.markdown("- **Revenue** = Σ qty × unit_price × (1−discount) · **Margin** = profit/revenue · **AOV** = revenue/orders\n"
+                "- **CAC (proxy)** = spend/conversions (no attribution join, so ROAS is intentionally not shown)\n"
+                "- **Churn label** = no purchase within 90 days after cutoff · **Forecast error** = MAE/RMSE/WAPE on a chronological hold-out vs seasonal-naive baseline")
+    st.subheader("Data pipeline")
+    try:
+        runs = load_table("pipeline_runs").sort_values("run_id", ascending=False).head(5); st.dataframe(runs, use_container_width=True)
+    except Exception: st.info("No pipeline runs logged yet.")
+    if st.button("Reload warehouse from sample CSVs (idempotent; decisions & run log are preserved)"):
+        from cortexora.pipelines.etl import run as _run
+        with st.spinner("Running ETL…"): _run(); st.cache_resource.clear(); st.success("Warehouse reloaded."); st.rerun()
+    st.subheader("What CORTEXORA deliberately does not do")
+    st.markdown("- No autonomous business actions — every recommendation needs a human decision.\n"
+                "- No causal claims from observational pages (pricing/discount/marketing pages say so inline).\n"
+                "- MMM fitting stays disabled until a joinable revenue outcome exists (readiness gate, Marketing page).\n"
+                "- No live competitor feed is simulated — Competitor Intelligence uses your validated snapshots only.")
 
 elif page == "Data Quality & Monitoring":
     st.title("Data Quality & Model Monitoring")
