@@ -38,8 +38,10 @@ def set_status(rid: str, status: str, db_path, owner: str = "") -> None:
     import sqlite3
     ensure_decision_schema(db_path)
     with sqlite3.connect(db_path) as con:
-        con.execute("UPDATE decisions SET status=?, decided_at=?, owner=CASE WHEN ?='' THEN owner ELSE ? END WHERE recommendation_id=?",
+        cur = con.execute("UPDATE decisions SET status=?, decided_at=?, owner=CASE WHEN ?='' THEN owner ELSE ? END WHERE recommendation_id=?",
                     (status, pd.Timestamp.now().isoformat(), owner, owner, rid))
+        if cur.rowcount == 0:
+            raise ValueError(f"Unknown recommendation id: {rid}")
 
 def inventory_recommendations(plan) -> list[dict]:
     """From optimization.reorder_plan output (forecast-based, Phase 5)."""

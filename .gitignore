@@ -5,3 +5,8 @@ __pycache__/
 data/processed/*.db
 .pytest_cache/
 cortexora/models/artifacts/*.joblib
+
+# Next.js frontend build output
+frontend/node_modules/
+frontend/.next/
+frontend/tsconfig.tsbuildinfo
