@@ -31,7 +31,7 @@ NAV = [
     ("OVERVIEW", [("🏠", "Home / Executive Overview")]),
     ("ANALYZE — what happened & why", [("📈", "Business Growth"), ("🎯", "Marketing Performance"), ("🥊", "Competitor Intelligence")]),
     ("PREDICT & OPTIMIZE — what next", [("🔮", "Demand Forecasting"), ("👥", "Customer Intelligence"), ("💲", "Pricing & Profit Optimization")]),
-    ("DECIDE — what should we do", [("🧠", "Decision Intelligence Engine"), ("🧪", "Experiments & Causal Lab")]),
+    ("DECIDE — what should we do", [("🤖", "AI Assistant"), ("🧠", "Decision Intelligence Engine"), ("🧪", "Experiments & Causal Lab")]),
     ("SYSTEM", [("🩺", "Data Quality & Monitoring"), ("📄", "Reports"), ("⚙️", "Settings & About")]),
 ]
 ALL_PAGES = [pg for _, items_ in NAV for _, pg in items_]
@@ -46,6 +46,7 @@ PAGE_META = {
  "Demand Forecasting": ("What might happen next?", "Demand outlook with measured accuracy, plus the inventory actions it implies."),
  "Customer Intelligence": ("What might happen next?", "Who your customers are, and who is quietly leaving."),
  "Pricing & Profit Optimization": ("What should we do?", "Price, discount and break-even scenarios — assumption-based, honestly labelled."),
+ "AI Assistant": ("Ask anything", "Answers computed live from your warehouse — KPIs, forecasts, churn, stockouts, marketing and decisions, with the receipts."),
  "Decision Intelligence Engine": ("What should we do?", "Evidence-ranked recommendations. You approve; the system tracks whether it worked."),
  "Experiments & Causal Lab": ("Did it work? What is causal?", "Design and analyse A/B tests and quasi-experiments with proper uncertainty."),
  "Data Quality & Monitoring": ("Can we trust this?", "Data quality, pipeline health, drift and measured model performance."),
@@ -486,6 +487,35 @@ elif page == "Competitor Intelligence":
             for a in alerts.itertuples(): st.error(f"⚠️ {a.competitor} undercuts {a.product_name} by {abs(a.gap_pct):.1f}% (theirs ${a.competitor_price:.2f} vs ours ${a.list_price:.2f}, observed {a.observed_at}, source: {a.source_url})")
             st.download_button("Download comparison report CSV", gaps.to_csv(index=False), "competitor_report.csv")
         except ValueError as e: st.error(f"Invalid snapshot: {e}")
+
+elif page == "AI Assistant":
+    page_intro()
+    st.caption("Fully offline, data-grounded assistant: every number it quotes is computed by this app's analytics right now. It does not invent figures, and it will tell you when the data can't answer. (No external LLM API is used — see docs/12.)")
+    from cortexora.assistant.chatbot import answer_question, SUGGESTIONS
+    import json as _json, pathlib as _pl
+    _art = _pl.Path("cortexora/models/artifacts/churn_evaluation.json")
+    _ctx = dict(df=df, orders=orders, items=items, products=products, mkt=mkt, inv=inv,
+                decisions=load_decisions(DB_PATH),
+                churn_rep=_json.loads(_art.read_text()) if _art.exists() else None)
+    if "chat_msgs" not in st.session_state:
+        st.session_state["chat_msgs"] = [dict(role="assistant", text="Hi, I'm the **CORTEXORA Assistant** 🤖. Ask me about revenue, forecasts, churn risk, stockouts, marketing, or what to do next — or tap a suggestion below.", table=None, navigate=None)]
+    def _ask(question):
+        ans = answer_question(question, _ctx)
+        st.session_state["chat_msgs"].append(dict(role="user", text=question, table=None, navigate=None))
+        st.session_state["chat_msgs"].append(dict(role="assistant", text=ans["text"], table=ans.get("table"), navigate=ans.get("navigate")))
+    st.markdown("**Try asking:**")
+    _sg = st.columns(4)
+    for i, s_ in enumerate(SUGGESTIONS):
+        _sg[i % 4].button(s_, key=f"sug_{i}", use_container_width=True, on_click=_ask, args=(s_,))
+    for m_ in st.session_state["chat_msgs"]:
+        with st.chat_message(m_["role"]):
+            st.markdown(m_["text"])
+            if m_.get("table") is not None: st.dataframe(m_["table"], use_container_width=True)
+            if m_.get("navigate"): st.button(f"➡️ Open {m_['navigate']}", key=f"chatnav_{abs(hash(m_['text']+m_['navigate']))%99999}", on_click=go, args=(m_["navigate"],))
+    _q = st.chat_input("Ask about your business… e.g. 'Why did revenue change?'")
+    if _q: _ask(_q); st.rerun()
+    if st.button("🧹 Clear conversation", key="clear_chat"):
+        st.session_state["chat_msgs"] = []; st.rerun()
 
 elif page == "Decision Intelligence Engine":
     page_intro()
