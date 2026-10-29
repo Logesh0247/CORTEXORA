@@ -34,7 +34,7 @@ function UploadPredict() {
     <div className="flex flex-wrap items-center gap-3 justify-between">
       <div>
         <h3 className="font-bold text-[16px]">📥 Analyse &amp; predict from your own dataset</h3>
-        <p className="mut text-[13px] mt-0.5">Upload a sales CSV (one row per sold item; date, product, quantity, unit price required). CORTEXORA validates it, computes KPIs and trends, then <b>forecasts the next 8 weeks</b> from your file — scored against a baseline. In-memory only; nothing is stored.</p>
+        <p className="mut text-[13px] mt-0.5">Upload <b>any</b> CSV dataset — columns are detected from names <i>and</i> contents (renamed, ₹/$-formatted, aggregated, or non-sales files all work). CORTEXORA verifies the file first, then analyses and <b>forecasts the next 8 weeks</b> as far as its structure honestly allows. In-memory only; nothing is stored.</p>
       </div>
       <label className="btn primary" style={{ cursor: "pointer", padding: "10px 18px" }}>
         {busy ? "⏳ Analysing & forecasting…" : "⬆ Upload dataset (CSV)"}
@@ -43,7 +43,48 @@ function UploadPredict() {
     </div>
     {fname && !busy && <p className="text-[12.5px] mut mt-2">File: <b style={{ color: "var(--txt)" }}>{fname}</b></p>}
     {err && <p className="text-sm mt-2" role="alert" style={{ color: "var(--bad)" }}>⚠️ {err}</p>}
-    {res && (<div className="mt-4">
+    {res?.verification && (<details className="card p-3.5 mt-3" style={{ background: "var(--panel2)" }} open={res.kind === "generic"}>
+      <summary className="font-bold text-sm cursor-pointer">🔍 Dataset verification — <span style={{ color: "var(--a)" }}>{res.verification.dataset_type}</span>
+        <span className="mut font-normal"> · click to {res.kind === "generic" ? "collapse" : "expand"} checks, column profile & detected mapping</span></summary>
+      <div className="grid gap-4 mt-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
+        <div>{res.verification.checks.map((c: any) => (
+          <div key={c.check} className="flex gap-2 text-[13px] py-1" style={{ borderBottom: "1px solid var(--line)" }}>
+            <span>{c.status === "PASS" ? "✅" : "⚠️"}</span><span><b>{c.check}</b> — <span className="mut">{c.detail}</span></span></div>))}
+          <div className="mt-2 flex flex-wrap gap-1.5">{res.kind === "sales" && Object.entries(res.verification.mapping).filter(([, v]: any) => v.column).map(([f, v]: any) => (
+            <span key={f} className="chip" style={{ cursor: "default" }} title={v.how}>{f} ← <b>{v.column}</b> · {v.confidence}</span>))}</div>
+        </div>
+        <div style={{ overflowX: "auto" }}><table><thead><tr><th>Column</th><th>Type</th><th>Filled</th><th>Unique</th><th>Sample</th></tr></thead>
+          <tbody>{res.verification.columns.map((c: any) => (<tr key={c.column}><td><b>{c.column}</b></td><td>{c.kind}</td><td>{c.non_null_pct}%</td><td>{c.unique}</td><td className="mut">{c.sample.join(", ")}</td></tr>))}</tbody></table></div>
+      </div>
+      {(res.warnings || []).map((w: string) => <p key={w} className="text-[13px] mt-2" style={{ color: "var(--warn)" }}>⚠️ {w}</p>)}
+    </details>)}
+    {res?.kind === "generic" && (<div className="mt-4">
+      <p className="text-sm">This dataset was <b>verified and profiled</b> — it isn't sales-shaped (no date + sales-value pair), so here is what can honestly be said about it:</p>
+      {res.timeseries_note && <p className="text-sm mut mt-1">{res.timeseries_note}</p>}
+      <div className="grid gap-4 mt-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
+        <ChartCard title="Numeric columns" sub="Distribution summary computed from your file">
+          <DataTable rows={res.numeric_summary} pageSize={8} columns={[
+            { k: "column", label: "Column" }, { k: "mean", label: "Mean", fmt: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) },
+            { k: "median", label: "Median", fmt: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) },
+            { k: "min", label: "Min", fmt: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) },
+            { k: "max", label: "Max", fmt: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) },
+            { k: "missing_pct", label: "Missing", fmt: (v: number) => v + "%" }]} />
+        </ChartCard>
+        <div>
+          <ChartCard title="Strongest associations" sub="Correlation between numeric columns — association, never causation">
+            {res.correlations?.length ? res.correlations.map((c: any) => (
+              <div key={c.a + c.b} className="flex justify-between text-[13px] py-1" style={{ borderBottom: "1px solid var(--line)" }}>
+                <span>{c.a} ↔ {c.b}</span><b style={{ color: Math.abs(c.correlation) > 0.7 ? "var(--a)" : "var(--txt)" }}>{c.correlation}</b></div>))
+              : <p className="mut text-sm">Not enough numeric column pairs to correlate.</p>}
+          </ChartCard>
+          {(res.categorical_summary || []).map((c: any) => (
+            <div key={c.column} className="card p-3 mt-3"><div className="lab">{c.column} — most frequent</div>
+              {c.top_values.map((t: any) => <div key={t.value} className="flex justify-between text-[13px] py-0.5"><span>{t.value}</span><span className="mut">{t.rows} rows</span></div>)}</div>))}
+        </div>
+      </div>
+      <p className="mut text-[12.5px] mt-2">{res.note}</p>
+    </div>)}
+    {res?.kind === "sales" && (<div className="mt-4">
       <div className="flex flex-wrap gap-2 text-[12px] mb-3">
         <span className="chip on" style={{ cursor: "default" }}>✅ {res.report.rows_used.toLocaleString()} rows analysed</span>
         {res.report.rows_dropped > 0 && <span className="chip" style={{ cursor: "default", color: "var(--warn)" }}>{res.report.rows_dropped} rows dropped (counted, never silent)</span>}
@@ -70,7 +111,7 @@ function UploadPredict() {
           <h3 className="font-bold">🔮 Prediction — next 8 weeks</h3>
           {fc?.available ? (<>
             <div className="flex gap-6 mt-2 flex-wrap">
-              <div><div className="lab">Predicted units</div><div className="kpi-val text-[24px] font-extrabold">{Math.round(fc.predicted_units_8w).toLocaleString()}</div></div>
+              {fc.predicted_units_8w !== null && fc.predicted_units_8w !== undefined && <div><div className="lab">Predicted units</div><div className="kpi-val text-[24px] font-extrabold">{Math.round(fc.predicted_units_8w).toLocaleString()}</div></div>}
               <div><div className="lab">Predicted revenue</div><div className="kpi-val text-[24px] font-extrabold">{money(fc.predicted_revenue_8w)}</div></div>
               <div><div className="lab">History used</div><div className="kpi-val text-[24px] font-extrabold">{fc.weeks_of_history} wks</div></div>
             </div>
@@ -78,8 +119,8 @@ function UploadPredict() {
               <CartesianGrid strokeDasharray="3 3" opacity={.25} /><XAxis dataKey="week" tick={{ fontSize: 10 }} minTickGap={40} /><YAxis tick={{ fontSize: 11 }} />
               <Tooltip /><Legend />
               <Area dataKey="range" name="80% interval" stroke="none" fill="#8b7cf6" fillOpacity={.18} />
-              <Line dataKey="actual" name="Actual units/wk" stroke="#22b8d8" strokeWidth={2} dot={false} />
-              <Line dataKey="forecast" name="Forecast units/wk" stroke="#8b7cf6" strokeWidth={2.2} strokeDasharray="6 4" dot={{ r: 2.5 }} />
+              <Line dataKey="actual" name={fc.metric === "revenue" ? "Actual revenue/wk" : "Actual units/wk"} stroke="#22b8d8" strokeWidth={2} dot={false} />
+              <Line dataKey="forecast" name={fc.metric === "revenue" ? "Forecast revenue/wk" : "Forecast units/wk"} stroke="#8b7cf6" strokeWidth={2.2} strokeDasharray="6 4" dot={{ r: 2.5 }} />
             </ComposedChart></ResponsiveContainer></div>
             <p className="text-[13px] mt-2">{fc.method}. Hold-out: model WAPE <b>{(fc.model_wape * 100).toFixed(1)}%</b> vs baseline <b>{(fc.baseline_wape * 100).toFixed(1)}%</b> — {fc.model_beats_baseline
               ? <span style={{ color: "var(--good)", fontWeight: 700 }}>the model beat the baseline on data it never saw.</span>

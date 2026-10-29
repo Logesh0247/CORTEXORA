@@ -152,16 +152,69 @@ def datasources():
 
 @app.post("/api/upload/analyse")
 async def upload_analyse(file: UploadFile = File(...), cost_ratio: float = 0.55):
-    from cortexora.pipelines.upload import guess_mapping, transform
+    """Analyse ANY tabular CSV: detect columns by name AND content, verify the
+    dataset, then run sales analysis + prediction as far as its structure
+    honestly allows. Non-sales datasets get a profile + statistical summary
+    instead of a hard failure."""
+    from cortexora.pipelines.upload import (detect_mapping, profile_dataset, transform,
+                                            parse_dates, _clean_num, _col_kind)
     raw_bytes = await file.read()
-    try: raw = pd.read_csv(io.BytesIO(raw_bytes))
-    except Exception: raw = pd.read_csv(io.BytesIO(raw_bytes), encoding="latin-1")
+    raw = None
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            raw = pd.read_csv(io.BytesIO(raw_bytes), sep=None, engine="python", encoding=enc)
+            if len(raw.columns) >= 1: break
+        except Exception:
+            raw = None
+    if raw is None or raw.empty or len(raw.columns) == 0:
+        raise HTTPException(422, "Could not read this file as a table. Upload a CSV with a header row.")
+    raw.columns = [str(c).strip() for c in raw.columns]
+    detected = detect_mapping(raw)
+    profile = profile_dataset(raw, detected)
+    mapping = {f: v["column"] for f, v in detected.items()}
+    verification = {"dataset_type": profile["dataset_type"], "checks": profile["checks"],
+                    "columns": profile["columns"], "mapping": detected,
+                    "analysable_as_sales": profile["analysable_as_sales"]}
+
+    if not profile["analysable_as_sales"]:
+        # ---- generic dataset: verify + summarise, never fake a sales analysis ----
+        numeric, categorical, correlations = [], [], []
+        num_cols = {}
+        for c in raw.columns:
+            if _col_kind(raw[c]) == "numeric":
+                v = _clean_num(raw[c]); num_cols[c] = v
+                numeric.append({"column": str(c), "count": int(v.notna().sum()), "mean": float(v.mean()),
+                                "median": float(v.median()), "min": float(v.min()), "max": float(v.max()),
+                                "missing_pct": round(float(v.isna().mean() * 100), 1)})
+            elif raw[c].dtype == object and raw[c].nunique() <= 20:
+                categorical.append({"column": str(c),
+                                    "top_values": [{"value": str(k)[:40], "rows": int(n)}
+                                                   for k, n in raw[c].value_counts().head(5).items()]})
+        keys = list(num_cols)
+        for i in range(len(keys)):
+            for j in range(i + 1, len(keys)):
+                pair = pd.concat([num_cols[keys[i]], num_cols[keys[j]]], axis=1).dropna()
+                if len(pair) > 3 and pair.iloc[:, 0].std() and pair.iloc[:, 1].std():
+                    correlations.append({"a": str(keys[i]), "b": str(keys[j]),
+                                         "correlation": round(float(pair.iloc[:, 0].corr(pair.iloc[:, 1])), 3),
+                                         "note": "association only — not causation"})
+        correlations.sort(key=lambda x: -abs(x["correlation"]))
+        ts_note = None
+        if profile["analysable_as_timeseries"] and detected["order_date"]["column"]:
+            dcol = detected["order_date"]["column"]
+            dates, _ = parse_dates(raw[dcol])
+            ts_note = f"Date column detected ({dcol}): {int(dates.notna().sum())} parseable dates from {str(dates.min())[:10]} to {str(dates.max())[:10]}. Add a sales value column (price or total) to unlock trend + forecast."
+        return {"kind": "generic", "mode": MODE, "verification": verification,
+                "numeric_summary": numeric, "categorical_summary": categorical,
+                "correlations": correlations[:8], "timeseries_note": ts_note,
+                "note": "This file was verified and profiled, but no date + sales-value pair was detected, so sales KPIs and forecasting were not run. Rename columns or add a date and price/total column — detection also reads column contents, not just names."}
+
     try:
-        frames, report = transform(raw, guess_mapping(list(raw.columns)), cost_ratio)
-    except ValueError as e: raise HTTPException(422, str(e))
+        frames, report = transform(raw, mapping, cost_ratio)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     from cortexora.analytics.metrics import enrich
     d = enrich(frames["orders"], frames["order_items"]).merge(frames["products"][["product_id", "category"]], on="product_id")
-    # --- trend + top products (observed facts from the uploaded file) ---
     d["month"] = d["order_date"].dt.to_period("M").astype(str)
     trend = rec(d.groupby("month").agg(revenue=("revenue", "sum"), profit=("profit", "sum"),
                                        units=("qty", "sum"), orders=("order_id", "nunique")).reset_index()
@@ -169,11 +222,15 @@ async def upload_analyse(file: UploadFile = File(...), cost_ratio: float = 0.55)
     by_product = rec(d.groupby(["product_id", "product_name", "category"] if "product_name" in d else ["product_id", "category"])
                      .agg(revenue=("revenue", "sum"), profit=("profit", "sum"), units=("qty", "sum")).reset_index()
                      .sort_values("revenue", ascending=False).head(10))
-    # --- prediction: forecast the uploaded file's OWN weekly demand, scored honestly ---
+    # --- prediction on the uploaded file's OWN series (units, or revenue for aggregates) ---
     forecast_block = None
     try:
         from cortexora.models.forecasting import weekly_series, evaluate, forecast_next
-        ws = weekly_series(d)
+        if report.get("qty_is_assumed"):
+            ws = d.set_index("order_date").resample("W")["revenue"].sum().asfreq("W").fillna(0)
+            metric_name, unit_label = "revenue", "Revenue $"
+        else:
+            ws = weekly_series(d); metric_name, unit_label = "units", "Units"
         weeks = int(len(ws))
         avg_unit_revenue = float(d["revenue"].sum() / d["qty"].sum()) if d["qty"].sum() else 0.0
         if weeks >= 24:
@@ -182,22 +239,29 @@ async def upload_analyse(file: UploadFile = File(...), cost_ratio: float = 0.55)
             model_wape, base_wape = ev["moving_average_4w"]["WAPE"], ev["seasonal_naive"]["WAPE"]
             rows = [{"week": str(pd.Timestamp(r.week).date()), "forecast": float(r.forecast),
                      "lower": float(r.lower), "upper": float(r.upper),
-                     "forecast_revenue": float(r.forecast * avg_unit_revenue)} for r in fcdf.itertuples()]
-            forecast_block = {"available": True, "weeks_of_history": weeks,
+                     "forecast_revenue": float(r.forecast if metric_name == "revenue" else r.forecast * avg_unit_revenue)}
+                    for r in fcdf.itertuples()]
+            forecast_block = {"available": True, "metric": metric_name, "weeks_of_history": weeks,
                               "history": [{"week": str(t.date()), "units": float(v)} for t, v in ws.tail(26).items()],
                               "forecast": rows,
-                              "predicted_units_8w": float(fcdf["forecast"].sum()),
-                              "predicted_revenue_8w": float(fcdf["forecast"].sum() * avg_unit_revenue),
+                              "predicted_units_8w": float(fcdf["forecast"].sum()) if metric_name == "units" else None,
+                              "predicted_revenue_8w": float(fcdf["forecast"].sum() if metric_name == "revenue" else fcdf["forecast"].sum() * avg_unit_revenue),
                               "model_wape": model_wape, "baseline_wape": base_wape,
                               "model_beats_baseline": bool(model_wape < base_wape),
-                              "method": "4-week moving average vs seasonal-naive baseline, chronological 12-week hold-out (WAPE)"}
+                              "method": f"4-week moving average on weekly {metric_name} vs seasonal-naive baseline, chronological 12-week hold-out (WAPE)"}
         else:
-            forecast_block = {"available": False, "weeks_of_history": weeks,
+            forecast_block = {"available": False, "metric": metric_name, "weeks_of_history": weeks,
                               "reason": f"Only {weeks} weekly periods in this file — at least ~24 are needed for a forecast with an honest hold-out evaluation. The analysis above still applies."}
-    except Exception as e:  # never fail the whole analysis because prediction is unavailable
+    except Exception as e:
         forecast_block = {"available": False, "weeks_of_history": 0, "reason": f"Forecast unavailable for this file: {e}"}
-    return {"mode": MODE, "report": report, "kpis": kpis(d), "trend": trend, "top_products": by_product,
-            "forecast": forecast_block,
+    warnings = []
+    if report.get("qty_is_assumed"): warnings.append("No quantity column detected — each row treated as one sale; unit-based metrics reflect row counts.")
+    if report.get("price_is_derived"): warnings.append("Unit price derived from the line-total column ÷ quantity.")
+    if report.get("product_is_fallback"): warnings.append("No product column detected — everything analysed as one combined series.")
+    if report.get("date_note") and "assumed" in str(report["date_note"]): warnings.append(f"Dates: {report['date_note']}.")
+    return {"kind": "sales", "mode": MODE, "report": report, "kpis": kpis(d), "trend": trend,
+            "top_products": by_product, "forecast": forecast_block, "verification": verification,
+            "warnings": warnings,
             "by_category": rec(d.groupby("category").agg(revenue=("revenue", "sum"), profit=("profit", "sum")).reset_index()),
             "note": "Analysed in-memory only. To make it the live warehouse, use the Streamlit Upload & Analyse page's load step (same transform, ETL-gated)."}
 
