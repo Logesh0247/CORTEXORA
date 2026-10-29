@@ -12,137 +12,119 @@ const hour = new Date().getHours();
 const GREET = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
 function UploadPredict() {
-  const [res, setRes] = useState<any>(null); const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false); const [fname, setFname] = useState("");
-  async function onFile(e: any) {
-    const f = e.target.files?.[0]; if (!f) return;
-    setBusy(true); setErr(""); setRes(null); setFname(f.name);
-    const fd = new FormData(); fd.append("file", f);
+  const [batch, setBatch] = useState<any>(null); const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false); const [names, setNames] = useState<string[]>([]);
+  const folderRef = (el: HTMLInputElement | null) => { if (el) { el.setAttribute("webkitdirectory", ""); el.setAttribute("directory", ""); } };
+  async function onFiles(e: any) {
+    const list: File[] = Array.from(e.target.files || []); if (!list.length) return;
+    setBusy(true); setErr(""); setBatch(null); setNames(list.map((f) => f.name));
+    const fd = new FormData(); list.forEach((f) => fd.append("files", f, (f as any).webkitRelativePath || f.name));
     try {
-      const r = await fetch("/api/upload/analyse", { method: "POST", body: fd });
+      const r = await fetch("/api/upload/multi", { method: "POST", body: fd });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.detail || "Upload failed — check the file is a valid sales CSV.");
-      setRes(j);
+      if (!r.ok) throw new Error(j.detail || "Upload failed.");
+      setBatch(j);
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); e.target.value = ""; }
   }
-  const fc = res?.forecast;
-  const fcData = fc?.available ? [
-    ...fc.history.map((h: any) => ({ week: h.week, actual: Math.round(h.units) })),
-    ...fc.forecast.map((h: any) => ({ week: h.week, forecast: Math.round(h.forecast), range: [Math.round(h.lower), Math.round(h.upper)] })),
+  const c = batch?.combined;
+  const fcData = c?.forecast?.available ? [
+    ...c.forecast.history.map((h: any) => ({ week: h.week, actual: Math.round(h.units) })),
+    ...c.forecast.forecast.map((h: any) => ({ week: h.week, forecast: Math.round(h.forecast), range: [Math.round(h.lower), Math.round(h.upper)] })),
   ] : [];
   return (<div className="card p-4 mb-4" style={{ borderColor: "var(--a)" }}>
     <div className="flex flex-wrap items-center gap-3 justify-between">
-      <div>
-        <h3 className="font-bold text-[16px]">📥 Analyse &amp; predict from your own dataset</h3>
-        <p className="mut text-[13px] mt-0.5">Upload <b>any</b> CSV dataset — columns are detected from names <i>and</i> contents (renamed, ₹/$-formatted, aggregated, or non-sales files all work). CORTEXORA verifies the file first, then analyses and <b>forecasts the next 8 weeks</b> as far as its structure honestly allows. In-memory only; nothing is stored.</p>
+      <div style={{ maxWidth: 640 }}>
+        <h3 className="font-bold text-[16px]">📥 Analyse &amp; predict from your own datasets</h3>
+        <p className="mut text-[13px] mt-0.5">Upload <b>one file, many files, or a whole folder</b> — CSV, TSV, Excel, JSON, Parquet, or ZIP. Columns are detected from names <i>and</i> contents. Every file is verified; sales files are analysed individually <b>and combined</b>, then forecast for the next 8 weeks against a baseline. In-memory only; nothing is stored.</p>
       </div>
-      <label className="btn primary" style={{ cursor: "pointer", padding: "10px 18px" }}>
-        {busy ? "⏳ Analysing & forecasting…" : "⬆ Upload dataset (CSV)"}
-        <input type="file" accept=".csv,text/csv" hidden onChange={onFile} aria-label="Upload a sales CSV dataset" />
-      </label>
+      <div className="flex gap-2 flex-wrap">
+        <label className="btn primary" style={{ cursor: "pointer", padding: "10px 16px" }}>{busy ? "⏳ Analysing…" : "⬆ Upload files"}
+          <input type="file" multiple accept=".csv,.tsv,.txt,.xlsx,.xls,.json,.parquet,.pq,.zip" hidden onChange={onFiles} aria-label="Upload dataset files" /></label>
+        <label className="btn primary" style={{ cursor: "pointer", padding: "10px 16px" }}>📁 Upload folder
+          <input ref={folderRef} type="file" multiple hidden onChange={onFiles} aria-label="Upload a folder of datasets" /></label>
+      </div>
     </div>
-    {fname && !busy && <p className="text-[12.5px] mut mt-2">File: <b style={{ color: "var(--txt)" }}>{fname}</b></p>}
+    {names.length > 0 && <p className="text-[12.5px] mut mt-2">Selected: <b style={{ color: "var(--txt)" }}>{names.slice(0, 4).join(", ")}{names.length > 4 ? ` +${names.length - 4} more` : ""}</b> · limits: {batch?.limits || "max 25 files, 25 MB each"}</p>}
     {err && <p className="text-sm mt-2" role="alert" style={{ color: "var(--bad)" }}>⚠️ {err}</p>}
-    {res?.verification && (<details className="card p-3.5 mt-3" style={{ background: "var(--panel2)" }} open={res.kind === "generic"}>
-      <summary className="font-bold text-sm cursor-pointer">🔍 Dataset verification — <span style={{ color: "var(--a)" }}>{res.verification.dataset_type}</span>
-        <span className="mut font-normal"> · click to {res.kind === "generic" ? "collapse" : "expand"} checks, column profile & detected mapping</span></summary>
-      <div className="grid gap-4 mt-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
-        <div>{res.verification.checks.map((c: any) => (
-          <div key={c.check} className="flex gap-2 text-[13px] py-1" style={{ borderBottom: "1px solid var(--line)" }}>
-            <span>{c.status === "PASS" ? "✅" : "⚠️"}</span><span><b>{c.check}</b> — <span className="mut">{c.detail}</span></span></div>))}
-          <div className="mt-2 flex flex-wrap gap-1.5">{res.kind === "sales" && Object.entries(res.verification.mapping).filter(([, v]: any) => v.column).map(([f, v]: any) => (
-            <span key={f} className="chip" style={{ cursor: "default" }} title={v.how}>{f} ← <b>{v.column}</b> · {v.confidence}</span>))}</div>
+
+    {batch && (<div className="mt-4">
+      <h4 className="font-bold text-sm mb-2">🗂️ Dataset inventory — {batch.files_expanded} file(s) from {batch.files_received} upload(s)</h4>
+      <div style={{ overflowX: "auto" }}><table><thead><tr><th>File</th><th>Format</th><th>Rows × Cols</th><th>Detected type</th><th>Status</th></tr></thead>
+        <tbody>{batch.per_file.map((e: any, i: number) => (<tr key={i}>
+          <td><b>{e.file}</b>{e.parse_note && <div className="mut text-[12px]">{e.parse_note}</div>}</td>
+          <td>{e.format || "—"}</td><td>{e.rows !== undefined ? `${e.rows.toLocaleString()} × ${e.columns}` : "—"}</td>
+          <td>{e.dataset_type || "—"}</td>
+          <td>{e.status === "ok" ? <span style={{ color: "var(--good)", fontWeight: 700 }}>✅ analysed</span> : <span style={{ color: "var(--bad)" }}>⛔ {e.error}</span>}</td></tr>))}</tbody></table></div>
+
+      {c && (<div className="card p-4 mt-4" style={{ background: "var(--panel2)" }}>
+        <h4 className="font-bold">🧩 Combined analysis — {c.files_combined} sales file(s), {c.date_min} → {c.date_max}</h4>
+        <div className="grid gap-3 my-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))" }}>
+          <KpiCard label="Combined Revenue" value={money(c.kpis.revenue)} sub="all sales files unified" />
+          <KpiCard label="Combined Profit" value={money(c.kpis.profit)} sub="labelled assumptions per file apply" />
+          <KpiCard label="Margin" value={(c.kpis.margin * 100).toFixed(1) + "%"} sub={`${c.kpis.orders.toLocaleString()} orders`} />
+          <KpiCard label="Predicted Revenue (8w)" value={c.forecast?.available ? money(c.forecast.predicted_revenue_8w) : "—"}
+            sub={c.forecast?.available ? `model WAPE ${(c.forecast.model_wape * 100).toFixed(1)}% vs baseline ${(c.forecast.baseline_wape * 100).toFixed(1)}%${c.forecast.model_beats_baseline ? " · model wins" : " · baseline wins — indicative only"}` : (c.forecast?.reason || "")} />
         </div>
-        <div style={{ overflowX: "auto" }}><table><thead><tr><th>Column</th><th>Type</th><th>Filled</th><th>Unique</th><th>Sample</th></tr></thead>
-          <tbody>{res.verification.columns.map((c: any) => (<tr key={c.column}><td><b>{c.column}</b></td><td>{c.kind}</td><td>{c.non_null_pct}%</td><td>{c.unique}</td><td className="mut">{c.sample.join(", ")}</td></tr>))}</tbody></table></div>
-      </div>
-      {(res.warnings || []).map((w: string) => <p key={w} className="text-[13px] mt-2" style={{ color: "var(--warn)" }}>⚠️ {w}</p>)}
-    </details>)}
-    {res?.kind === "generic" && (<div className="mt-4">
-      <p className="text-sm">This dataset was <b>verified and profiled</b> — it isn't sales-shaped (no date + sales-value pair), so here is what can honestly be said about it:</p>
-      {res.timeseries_note && <p className="text-sm mut mt-1">{res.timeseries_note}</p>}
-      <div className="grid gap-4 mt-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
-        <ChartCard title="Numeric columns" sub="Distribution summary computed from your file">
-          <DataTable rows={res.numeric_summary} pageSize={8} columns={[
-            { k: "column", label: "Column" }, { k: "mean", label: "Mean", fmt: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) },
-            { k: "median", label: "Median", fmt: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) },
-            { k: "min", label: "Min", fmt: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) },
-            { k: "max", label: "Max", fmt: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) },
-            { k: "missing_pct", label: "Missing", fmt: (v: number) => v + "%" }]} />
-        </ChartCard>
-        <div>
-          <ChartCard title="Strongest associations" sub="Correlation between numeric columns — association, never causation">
-            {res.correlations?.length ? res.correlations.map((c: any) => (
-              <div key={c.a + c.b} className="flex justify-between text-[13px] py-1" style={{ borderBottom: "1px solid var(--line)" }}>
-                <span>{c.a} ↔ {c.b}</span><b style={{ color: Math.abs(c.correlation) > 0.7 ? "var(--a)" : "var(--txt)" }}>{c.correlation}</b></div>))
-              : <p className="mut text-sm">Not enough numeric column pairs to correlate.</p>}
+        {c.forecast?.available && (<div style={{ height: 230 }}><ResponsiveContainer><ComposedChart data={fcData}>
+          <CartesianGrid strokeDasharray="3 3" opacity={.25} /><XAxis dataKey="week" tick={{ fontSize: 10 }} minTickGap={40} /><YAxis tick={{ fontSize: 11 }} />
+          <Tooltip /><Legend />
+          <Area dataKey="range" name="80% interval" stroke="none" fill="#8b7cf6" fillOpacity={.18} />
+          <Line dataKey="actual" name={c.forecast.metric === "revenue" ? "Actual revenue/wk" : "Actual units/wk"} stroke="#22b8d8" strokeWidth={2} dot={false} />
+          <Line dataKey="forecast" name="Forecast (8w)" stroke="#8b7cf6" strokeWidth={2.2} strokeDasharray="6 4" dot={{ r: 2.5 }} />
+        </ComposedChart></ResponsiveContainer></div>)}
+        <div className="grid gap-4 mt-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
+          <ChartCard title="Revenue by source file" sub="Contribution of each uploaded sales file">
+            <DataTable rows={c.by_source} pageSize={6} columns={[
+              { k: "source_file", label: "File" }, { k: "revenue", label: "Revenue", fmt: (v: number) => money(v) },
+              { k: "orders", label: "Orders", fmt: (v: number) => v.toLocaleString() }, { k: "units", label: "Units", fmt: (v: number) => Math.round(v).toLocaleString() }]} />
           </ChartCard>
-          {(res.categorical_summary || []).map((c: any) => (
-            <div key={c.column} className="card p-3 mt-3"><div className="lab">{c.column} — most frequent</div>
-              {c.top_values.map((t: any) => <div key={t.value} className="flex justify-between text-[13px] py-0.5"><span>{t.value}</span><span className="mut">{t.rows} rows</span></div>)}</div>))}
+          <ChartCard title="🏆 Combined top products" sub="Unified by product name across files">
+            <DataTable rows={c.top_products} pageSize={6} columns={[
+              { k: "product_name", label: "Product" }, { k: "category", label: "Category" },
+              { k: "revenue", label: "Revenue", fmt: (v: number) => money(v) }, { k: "units", label: "Units", fmt: (v: number) => Math.round(v).toLocaleString() }]} />
+          </ChartCard>
         </div>
-      </div>
-      <p className="mut text-[12.5px] mt-2">{res.note}</p>
-    </div>)}
-    {res?.kind === "sales" && (<div className="mt-4">
-      <div className="flex flex-wrap gap-2 text-[12px] mb-3">
-        <span className="chip on" style={{ cursor: "default" }}>✅ {res.report.rows_used.toLocaleString()} rows analysed</span>
-        {res.report.rows_dropped > 0 && <span className="chip" style={{ cursor: "default", color: "var(--warn)" }}>{res.report.rows_dropped} rows dropped (counted, never silent)</span>}
-        <span className="chip" style={{ cursor: "default" }}>{res.report.date_min} → {res.report.date_max}</span>
-        <span className="chip" style={{ cursor: "default" }}>{res.report.orders.toLocaleString()} orders · {res.report.products} products · {res.report.customers.toLocaleString()} customers</span>
-        {res.report.cost_is_assumption && <span className="chip" style={{ cursor: "default" }}>Profit uses labelled 55% cost assumption (no cost column)</span>}
-      </div>
-      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))" }}>
-        <KpiCard label="Your Revenue" value={money(res.kpis.revenue)} sub="from uploaded file" />
-        <KpiCard label="Your Profit" value={money(res.kpis.profit)} sub={res.report.cost_is_assumption ? "est. — cost assumption" : "after your costs"} />
-        <KpiCard label="Margin" value={(res.kpis.margin * 100).toFixed(1) + "%"} sub="profit / revenue" />
-        <KpiCard label="Avg Order Value" value={money(res.kpis.aov)} sub={`${res.kpis.units.toLocaleString()} units sold`} />
-      </div>
-      <div className="grid gap-4 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
-        <ChartCard title="Your revenue trend" sub="Monthly revenue & profit from the uploaded file">
-          <div style={{ height: 240 }}><ResponsiveContainer><AreaChart data={res.trend}>
-            <CartesianGrid strokeDasharray="3 3" opacity={.25} /><XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={30} /><YAxis tick={{ fontSize: 11 }} />
-            <Tooltip formatter={(v: any) => money(v)} /><Legend />
-            <Area dataKey="revenue" name="Revenue" stroke="#6366f1" fill="#6366f1" fillOpacity={.18} strokeWidth={2.2} />
-            <Area dataKey="profit" name="Profit" stroke="#2fbf8f" fill="#2fbf8f" fillOpacity={.14} strokeWidth={2} />
-          </AreaChart></ResponsiveContainer></div>
-        </ChartCard>
-        <div className="card p-4" style={{ background: "var(--panel2)" }}>
-          <h3 className="font-bold">🔮 Prediction — next 8 weeks</h3>
-          {fc?.available ? (<>
-            <div className="flex gap-6 mt-2 flex-wrap">
-              {fc.predicted_units_8w !== null && fc.predicted_units_8w !== undefined && <div><div className="lab">Predicted units</div><div className="kpi-val text-[24px] font-extrabold">{Math.round(fc.predicted_units_8w).toLocaleString()}</div></div>}
-              <div><div className="lab">Predicted revenue</div><div className="kpi-val text-[24px] font-extrabold">{money(fc.predicted_revenue_8w)}</div></div>
-              <div><div className="lab">History used</div><div className="kpi-val text-[24px] font-extrabold">{fc.weeks_of_history} wks</div></div>
+        <p className="mut text-[12.5px] mt-2">{c.note}</p>
+      </div>)}
+
+      {(batch.cross_file_links || []).length > 0 && (<div className="card p-3.5 mt-4">
+        <h4 className="font-bold text-sm">🔗 Cross-file relationships detected</h4>
+        {batch.cross_file_links.slice(0, 6).map((l: any, i: number) => (
+          <p key={i} className="text-[13px] mt-1.5"><b>{l.a}</b> ↔ <b>{l.b}</b> — shared: {[...(l.shared_columns || []), ...(l.shared_roles || [])].slice(0, 6).join(", ") || "—"} <span className="mut">· {l.suggestion}</span></p>))}
+      </div>)}
+
+      <h4 className="font-bold text-sm mt-4 mb-2">📄 Per-file results</h4>
+      <div className="space-y-3">{batch.per_file.filter((e: any) => e.status === "ok").map((e: any, i: number) => { const r = e.result; return (
+        <details key={i} className="card p-3.5" open={i === 0}>
+          <summary className="font-bold text-sm cursor-pointer">{e.file} <span className="mut font-normal">· {e.format} · {r.verification.dataset_type}</span>
+            {r.kind === "sales" && <span style={{ color: "var(--a)" }}> · revenue {money(r.kpis.revenue)} · forecast {r.forecast?.available ? "ready" : "not available"}</span>}
+            {r.kind === "generic" && <span className="mut font-normal"> · statistical profile</span>}</summary>
+          {(r.warnings || []).map((w: string) => <p key={w} className="text-[13px] mt-2" style={{ color: "var(--warn)" }}>⚠️ {w}</p>)}
+          {r.kind === "sales" ? (<div className="mt-2">
+            <div className="flex flex-wrap gap-2 text-[12px]">
+              <span className="chip" style={{ cursor: "default" }}>{r.report.rows_used.toLocaleString()} rows · {r.report.date_min} → {r.report.date_max}</span>
+              {r.report.rows_dropped > 0 && <span className="chip" style={{ cursor: "default", color: "var(--warn)" }}>{r.report.rows_dropped} dropped (counted)</span>}
+              <span className="chip" style={{ cursor: "default" }}>margin {(r.kpis.margin * 100).toFixed(1)}%</span>
+              {r.forecast?.available
+                ? <span className="chip on" style={{ cursor: "default" }}>🔮 8w: {money(r.forecast.predicted_revenue_8w)} · WAPE {(r.forecast.model_wape * 100).toFixed(1)}% vs {(r.forecast.baseline_wape * 100).toFixed(1)}% {r.forecast.model_beats_baseline ? "(model wins)" : "(baseline wins)"}</span>
+                : <span className="chip" style={{ cursor: "default" }}>🔮 {r.forecast?.reason || "no forecast"}</span>}
             </div>
-            <div style={{ height: 210, marginTop: 8 }}><ResponsiveContainer><ComposedChart data={fcData}>
-              <CartesianGrid strokeDasharray="3 3" opacity={.25} /><XAxis dataKey="week" tick={{ fontSize: 10 }} minTickGap={40} /><YAxis tick={{ fontSize: 11 }} />
-              <Tooltip /><Legend />
-              <Area dataKey="range" name="80% interval" stroke="none" fill="#8b7cf6" fillOpacity={.18} />
-              <Line dataKey="actual" name={fc.metric === "revenue" ? "Actual revenue/wk" : "Actual units/wk"} stroke="#22b8d8" strokeWidth={2} dot={false} />
-              <Line dataKey="forecast" name={fc.metric === "revenue" ? "Forecast revenue/wk" : "Forecast units/wk"} stroke="#8b7cf6" strokeWidth={2.2} strokeDasharray="6 4" dot={{ r: 2.5 }} />
-            </ComposedChart></ResponsiveContainer></div>
-            <p className="text-[13px] mt-2">{fc.method}. Hold-out: model WAPE <b>{(fc.model_wape * 100).toFixed(1)}%</b> vs baseline <b>{(fc.baseline_wape * 100).toFixed(1)}%</b> — {fc.model_beats_baseline
-              ? <span style={{ color: "var(--good)", fontWeight: 700 }}>the model beat the baseline on data it never saw.</span>
-              : <span style={{ color: "var(--warn)", fontWeight: 700 }}>the model did NOT beat the baseline — treat this forecast as indicative only.</span>}</p>
-            <p className="mut text-[12.5px]">A prediction under stated assumptions (4-week moving average, ~80% interval) — not a guaranteed outcome.</p>
-          </>) : (<p className="text-sm mt-2" style={{ color: "var(--warn)" }}>⚠️ {fc?.reason || "Forecast unavailable for this file."}</p>)}
-        </div>
-      </div>
-      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
-        <ChartCard title="Revenue by category" sub="From your file (uploaded products without categories show as Uncategorised)">
-          <div style={{ height: 230 }}><ResponsiveContainer><BarChart data={res.by_category} layout="vertical">
-            <CartesianGrid strokeDasharray="3 3" opacity={.25} /><XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => "$" + Math.round(v / 1000) + "k"} /><YAxis type="category" dataKey="category" tick={{ fontSize: 12 }} width={110} />
-            <Tooltip formatter={(v: any) => money(v)} /><Bar dataKey="revenue" name="Revenue" fill="#6366f1" radius={[0, 7, 7, 0]} /></BarChart></ResponsiveContainer></div>
-        </ChartCard>
-        <ChartCard title="🏆 Your top products" sub="By revenue in the uploaded file" action={<Link className="btn" href="/data-sources">Full workflow →</Link>}>
-          <DataTable rows={res.top_products} pageSize={6} columns={[
-            { k: "product_name", label: "Product", fmt: (v: any, r: any) => v ?? ("Product " + r.product_id) },
-            { k: "revenue", label: "Revenue", fmt: (v: number) => money(v) },
-            { k: "profit", label: "Profit", fmt: (v: number) => money(v) },
-            { k: "units", label: "Units", fmt: (v: number) => Math.round(v).toLocaleString() }]} />
-          <p className="mut text-[12.5px] mt-2">{res.note}</p>
-        </ChartCard>
+            <div style={{ height: 190, marginTop: 8 }}><ResponsiveContainer><AreaChart data={r.trend}>
+              <CartesianGrid strokeDasharray="3 3" opacity={.25} /><XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={30} /><YAxis tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(v: any) => money(v)} /><Area dataKey="revenue" name="Revenue" stroke="#6366f1" fill="#6366f1" fillOpacity={.18} strokeWidth={2} /></AreaChart></ResponsiveContainer></div>
+          </div>) : (<div className="mt-2 text-sm">
+            <p className="mut">{r.note}</p>
+            {!!r.numeric_summary?.length && <p className="mt-1">Numeric columns profiled: <b>{r.numeric_summary.map((n: any) => n.column).join(", ")}</b></p>}
+            {!!r.correlations?.length && <p className="mt-1">Strongest association: <b>{r.correlations[0].a} ↔ {r.correlations[0].b} ({r.correlations[0].correlation})</b> — association, not causation.</p>}
+            {r.timeseries_note && <p className="mut mt-1">{r.timeseries_note}</p>}
+          </div>)}
+          <details className="mt-2"><summary className="text-[13px] font-semibold cursor-pointer mut">🔍 Verification checks & column profile</summary>
+            <div className="mt-2">{r.verification.checks.map((chk: any) => (
+              <div key={chk.check} className="text-[13px] py-0.5">{chk.status === "PASS" ? "✅" : "⚠️"} <b>{chk.check}</b> — <span className="mut">{chk.detail}</span></div>))}
+              <div style={{ overflowX: "auto" }}><table><thead><tr><th>Column</th><th>Type</th><th>Filled</th><th>Unique</th><th>Sample</th></tr></thead>
+              <tbody>{r.verification.columns.map((col: any) => (<tr key={col.column}><td><b>{col.column}</b></td><td>{col.kind}</td><td>{col.non_null_pct}%</td><td>{col.unique}</td><td className="mut">{col.sample.join(", ")}</td></tr>))}</tbody></table></div>
+            </div></details>
+        </details>); })}
       </div>
     </div>)}
   </div>);

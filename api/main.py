@@ -265,6 +265,18 @@ async def upload_analyse(file: UploadFile = File(...), cost_ratio: float = 0.55)
             "by_category": rec(d.groupby("category").agg(revenue=("revenue", "sum"), profit=("profit", "sum")).reset_index()),
             "note": "Analysed in-memory only. To make it the live warehouse, use the Streamlit Upload & Analyse page's load step (same transform, ETL-gated)."}
 
+@app.post("/api/upload/multi")
+async def upload_multi(files: list[UploadFile] = File(...), cost_ratio: float = 0.55):
+    """Folder/batch upload: many files, many formats (CSV/TSV/Excel/JSON/
+    Parquet/ZIP). Every file is verified and analysed; sales files are also
+    combined. Bad members are reported per-file and never fail the batch."""
+    from cortexora.pipelines.multi import analyse_batch
+    payload = [(f.filename or "upload", await f.read()) for f in files]
+    try:
+        return {"mode": MODE, **analyse_batch(payload, cost_ratio)}
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
 @app.get("/api/reports/executive")
 def executive_report():
     from cortexora.reports.report import generate_markdown_report
