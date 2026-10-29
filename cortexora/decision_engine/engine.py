@@ -29,14 +29,17 @@ def churn_recommendations(rfm_df) -> list[dict]:
 
 def persist(recs: list[dict], db_path) -> None:
     import sqlite3
+    ensure_decision_schema(db_path)
     with sqlite3.connect(db_path) as con:
-        con.executemany("INSERT OR IGNORE INTO decisions(recommendation_id,created_at,area,problem,action,evidence,expected_impact,priority) VALUES (?,?,?,?,?,?,?,?)",
-                        [(r["recommendation_id"], pd.Timestamp.now().isoformat(), r["area"], r["problem"], r["action"], r["evidence"], r["expected_impact"], r["priority"]) for r in recs])
+        con.executemany("INSERT OR IGNORE INTO decisions(recommendation_id,created_at,area,problem,action,evidence,expected_impact,priority,measurement_period_days) VALUES (?,?,?,?,?,?,?,?,?)",
+                        [(r["recommendation_id"], pd.Timestamp.now().isoformat(), r["area"], r["problem"], r["action"], r["evidence"], r["expected_impact"], r["priority"], MEASUREMENT_DAYS.get(r["area"], 30)) for r in recs])
 
-def set_status(rid: str, status: str, db_path) -> None:
+def set_status(rid: str, status: str, db_path, owner: str = "") -> None:
     import sqlite3
+    ensure_decision_schema(db_path)
     with sqlite3.connect(db_path) as con:
-        con.execute("UPDATE decisions SET status=?, decided_at=? WHERE recommendation_id=?", (status, pd.Timestamp.now().isoformat(), rid))
+        con.execute("UPDATE decisions SET status=?, decided_at=?, owner=CASE WHEN ?='' THEN owner ELSE ? END WHERE recommendation_id=?",
+                    (status, pd.Timestamp.now().isoformat(), owner, owner, rid))
 
 def inventory_recommendations(plan) -> list[dict]:
     """From optimization.reorder_plan output (forecast-based, Phase 5)."""
@@ -66,3 +69,48 @@ def discount_recommendation(disc) -> list[dict]:
             f"Observed association only: {hi.revenue_share:.1%} of revenue at avg discount {hi.avg_discount:.1%} — not a causal estimate",
             float(hi.profit), 0.45, 0.5)]
     return []
+
+# ---------- Phase 7: outcome tracking & decision history ----------
+MEASUREMENT_DAYS = {"Inventory": 30, "Marketing": 28, "Customer": 90, "Pricing": 28}
+_DECISION_COLUMNS = {"owner": "TEXT", "measurement_period_days": "INTEGER",
+                     "outcome_note": "TEXT", "outcome_recorded_at": "TEXT", "actual_outcome": "REAL"}
+
+def ensure_decision_schema(db_path) -> None:
+    """Migrate an existing decisions table (created before Phase 7) in place."""
+    import sqlite3
+    with sqlite3.connect(db_path) as con:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(decisions)")}
+        for name, typ in _DECISION_COLUMNS.items():
+            if name not in cols: con.execute(f"ALTER TABLE decisions ADD COLUMN {name} {typ}")
+
+def load_decisions(db_path):
+    import sqlite3
+    ensure_decision_schema(db_path)
+    with sqlite3.connect(db_path) as con: return pd.read_sql("SELECT * FROM decisions ORDER BY priority DESC", con)
+
+def record_outcome(rid: str, actual: float, note: str, db_path, owner: str = "") -> None:
+    """Record the measured actual outcome for an APPROVED decision -> status 'measured'.
+    Refuses pending/rejected decisions: an outcome is only meaningful for an action taken."""
+    import sqlite3
+    ensure_decision_schema(db_path)
+    with sqlite3.connect(db_path) as con:
+        row = con.execute("SELECT status FROM decisions WHERE recommendation_id=?", (rid,)).fetchone()
+        if row is None: raise ValueError(f"Unknown recommendation {rid}")
+        if row[0] != "approved": raise ValueError(f"Cannot record outcome: decision is '{row[0]}', not 'approved'. Approve it first (only actions actually taken can be evaluated).")
+        con.execute("UPDATE decisions SET actual_outcome=?, outcome_note=?, outcome_recorded_at=?, owner=CASE WHEN ?='' THEN owner ELSE ? END, status='measured' WHERE recommendation_id=?",
+                    (float(actual), note, pd.Timestamp.now().isoformat(), owner, owner, rid))
+
+def outcome_summary(decisions) -> dict:
+    """Expected-vs-actual calibration for measured decisions. Empty-safe."""
+    if decisions.empty or "actual_outcome" not in decisions: return {"measured": 0}
+    m = decisions[decisions.actual_outcome.notna() & (decisions.expected_impact != 0)].copy()
+    if m.empty: return {"measured": 0}
+    m["variance"] = m.actual_outcome - m.expected_impact
+    m["variance_pct"] = m.variance / m.expected_impact.abs() * 100
+    return dict(measured=int(len(m)),
+                mean_variance_pct=float(m.variance_pct.mean()),
+                median_abs_variance_pct=float(m.variance_pct.abs().median()),
+                within_20pct=float((m.variance_pct.abs() <= 20).mean()),
+                by_area=m.groupby("area").agg(n=("recommendation_id", "count"),
+                                              mean_variance_pct=("variance_pct", "mean")).reset_index(),
+                detail=m)

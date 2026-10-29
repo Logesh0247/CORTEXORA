@@ -6,7 +6,7 @@ from cortexora.config import DB_PATH
 from cortexora.pipelines.etl import load_table
 from cortexora.analytics.metrics import enrich, kpis, period_compare, marketing_metrics
 from cortexora.models.forecasting import weekly_series, evaluate, forecast_next, rfm
-from cortexora.decision_engine.engine import stockout_recommendations, churn_recommendations, inventory_recommendations, budget_recommendation, discount_recommendation, persist, set_status
+from cortexora.decision_engine.engine import stockout_recommendations, churn_recommendations, inventory_recommendations, budget_recommendation, discount_recommendation, persist, set_status, record_outcome, load_decisions, outcome_summary
 from cortexora.optimization.optimize import reorder_plan, daily_demand_stats, discount_effectiveness, breakeven_units, optimize_budget
 from cortexora.analytics.experiments import ab_conversion, required_sample_size, srm_check, diff_in_diff, mmm_readiness
 from cortexora.analytics.competitor import validate_snapshots, price_gaps
@@ -170,20 +170,55 @@ elif page == "Competitor Intelligence":
 
 elif page == "Decision Intelligence Engine":
     st.title("Decision Intelligence Engine")
-    st.caption("Priority = √expected_impact × confidence × urgency. Human approval required — no autonomous actions.")
+    st.caption("Priority = √expected_impact × confidence × urgency. Human approval required — no autonomous actions. "
+               "Workflow: pending → approved/rejected/deferred → (after the measurement period) measured, with expected-vs-actual compared below.")
     stats = daily_demand_stats(df)
     stock = inv.merge(products[["product_id","category","unit_cost","list_price"]], on="product_id").merge(stats, on="product_id", how="left").fillna(0)
     plan = reorder_plan(stock)
     recs = (inventory_recommendations(plan) + budget_recommendation(optimize_budget(mkt))
             + discount_recommendation(discount_effectiveness(df)) + churn_recommendations(rfm(orders, items)))
     if st.button("Generate recommendations from current data"): persist(recs, DB_PATH); st.success(f"{len(recs)} generated (duplicates ignored)")
-    with sqlite3.connect(DB_PATH) as con: dec = pd.read_sql("SELECT * FROM decisions ORDER BY priority DESC", con)
+    dec = load_decisions(DB_PATH)
+    counts = dec.status.value_counts().to_dict() if len(dec) else {}
+    st.write("**Decision pipeline:** " + (" · ".join(f"{k}: {v}" for k, v in counts.items()) if counts else "no decisions yet"))
+    owner = st.text_input("Decision owner (recorded on approve/record)", value="")
     for r in dec.itertuples():
-        st.write(f"**{r.recommendation_id} · {r.area}** — {r.problem} → {r.action}  \nEvidence: {r.evidence} · Priority {r.priority} · Status **{r.status}**")
+        due = ""
+        if pd.notna(r.decided_at) and pd.notna(r.measurement_period_days):
+            due = f" · outcome due {(pd.Timestamp(r.decided_at) + pd.Timedelta(days=int(r.measurement_period_days))).date()}"
+        st.write(f"**{r.recommendation_id} · {r.area}** — {r.problem} → {r.action}  \nEvidence: {r.evidence} · Expected impact ${r.expected_impact:,.0f} · Priority {r.priority} · Status **{r.status}**{due}")
+        if r.area == "Pricing" and r.status == "pending":
+            st.caption("↳ Before acting, design this as a test in **Experiments & Causal Lab** (sidebar) so the outcome is causal, not anecdotal.")
         b = st.columns(3)
-        if b[0].button("Approve", key=r.recommendation_id+"a"): set_status(r.recommendation_id,"approved",DB_PATH); st.rerun()
-        if b[1].button("Reject", key=r.recommendation_id+"r"): set_status(r.recommendation_id,"rejected",DB_PATH); st.rerun()
-        if b[2].button("Defer", key=r.recommendation_id+"d"): set_status(r.recommendation_id,"deferred",DB_PATH); st.rerun()
+        if b[0].button("Approve", key=r.recommendation_id+"a"): set_status(r.recommendation_id,"approved",DB_PATH,owner); st.rerun()
+        if b[1].button("Reject", key=r.recommendation_id+"r"): set_status(r.recommendation_id,"rejected",DB_PATH,owner); st.rerun()
+        if b[2].button("Defer", key=r.recommendation_id+"d"): set_status(r.recommendation_id,"deferred",DB_PATH,owner); st.rerun()
+        if r.status == "approved":
+            with st.expander(f"Record actual outcome — {r.recommendation_id}"):
+                actual = st.number_input("Actual outcome (same units as expected impact, $)", key=r.recommendation_id+"act", value=float(r.expected_impact))
+                note = st.text_input("How was it measured? (source, period, caveats)", key=r.recommendation_id+"note")
+                if st.button("Record outcome", key=r.recommendation_id+"rec"):
+                    if not note: st.error("A measurement note is required — an outcome without a source is not evidence.")
+                    else:
+                        try: record_outcome(r.recommendation_id, actual, note, DB_PATH, owner); st.rerun()
+                        except ValueError as e: st.error(str(e))
+        if r.status == "measured":
+            var = (r.actual_outcome - r.expected_impact) / abs(r.expected_impact) * 100 if r.expected_impact else 0
+            st.caption(f"Measured: actual ${r.actual_outcome:,.0f} vs expected ${r.expected_impact:,.0f} ({var:+.1f}%) — {r.outcome_note}")
+    st.subheader("Outcome tracking — did our decisions work?")
+    s = outcome_summary(dec)
+    if s["measured"] == 0:
+        st.info("No measured outcomes yet. Approve a recommendation, act on it, wait its measurement period, then record the actual outcome above. CORTEXORA never invents outcome data.")
+    else:
+        m = st.columns(3); m[0].metric("Measured decisions", s["measured"]); m[1].metric("Median |variance| vs expected", f"{s['median_abs_variance_pct']:.1f}%"); m[2].metric("Within ±20% of expected", f"{s['within_20pct']:.0%}")
+        det = s["detail"]
+        st.plotly_chart(px.bar(det, x="recommendation_id", y="variance_pct", color="area", title="Outcome variance vs expectation (%) — calibration of the engine's estimates"), use_container_width=True)
+        st.dataframe(s["by_area"], use_container_width=True)
+        st.dataframe(det[["recommendation_id","area","expected_impact","actual_outcome","variance_pct","owner","outcome_note"]], use_container_width=True)
+        st.caption("Persistent large positive/negative bias by area means that detector's impact estimates are mis-calibrated — adjust its confidence/assumptions, don't just celebrate or panic over one result.")
+    st.subheader("Decision history (audit log)")
+    st.dataframe(dec, use_container_width=True)
+    st.download_button("Download decision history CSV", dec.to_csv(index=False), "cortexora_decision_history.csv")
 
 elif page == "Data Quality & Monitoring":
     st.title("Data Quality & Model Monitoring")
