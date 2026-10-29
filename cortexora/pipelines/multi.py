@@ -184,6 +184,7 @@ def analyse_frame(raw: pd.DataFrame, cost_ratio: float = 0.55) -> dict:
                 "timeseries_note": ts_note,
                 "note": "Verified and profiled, but no date + sales-value pair was detected, so sales KPIs and forecasting were not run."}
     d, report, _ = sales_lines(raw, cost_ratio)
+    from cortexora.pipelines.intelligence import business_intelligence
     d["month"] = d["order_date"].dt.to_period("M").astype(str)
     trend = _rec(d.groupby("month").agg(revenue=("revenue", "sum"), profit=("profit", "sum"),
                                         units=("qty", "sum"), orders=("order_id", "nunique")).reset_index()
@@ -196,8 +197,10 @@ def analyse_frame(raw: pd.DataFrame, cost_ratio: float = 0.55) -> dict:
     if report.get("price_is_derived"): warnings.append("Unit price derived from the line-total column ÷ quantity.")
     if report.get("product_is_fallback"): warnings.append("No product column detected — analysed as one combined series.")
     if report.get("date_note") and "assumed" in str(report["date_note"]): warnings.append(f"Dates: {report['date_note']}.")
+    fc_block = forecast_block_for(d, bool(report.get("qty_is_assumed")))
     return {"kind": "sales", "report": report, "kpis": kpis(d), "trend": trend,
-            "top_products": by_product, "forecast": forecast_block_for(d, bool(report.get("qty_is_assumed"))),
+            "intelligence": business_intelligence(d, report, fc_block),
+            "top_products": by_product, "forecast": fc_block,
             "verification": verification, "warnings": warnings,
             "by_category": _rec(d.groupby("category").agg(revenue=("revenue", "sum"), profit=("profit", "sum")).reset_index()),
             "note": "Analysed in-memory only; nothing is stored."}
@@ -206,6 +209,7 @@ def analyse_frame(raw: pd.DataFrame, cost_ratio: float = 0.55) -> dict:
 def analyse_batch(files: list[tuple[str, bytes]], cost_ratio: float = 0.55) -> dict:
     """The whole folder: per-file results + combined sales + cross-file links."""
     from cortexora.analytics.metrics import kpis
+    from cortexora.pipelines.intelligence import business_intelligence
     expanded = expand_uploads(files)
     per_file, sales_frames = [], []
     for name, data in expanded:
@@ -247,6 +251,11 @@ def analyse_batch(files: list[tuple[str, bytes]], cost_ratio: float = 0.55) -> d
                     "top_products": _rec(all_d.groupby(["product_key", "category"]).agg(revenue=("revenue", "sum"), units=("qty", "sum")).reset_index()
                                          .rename(columns={"product_key": "product_name"}).sort_values("revenue", ascending=False).head(10)),
                     "forecast": forecast_block_for(all_d, qty_assumed),
+                    "intelligence": business_intelligence(
+                        all_d,
+                        {"cost_is_assumption": any((e.get("result") or {}).get("report", {}).get("cost_is_assumption")
+                                                   for e in per_file if e.get("status") == "ok")},
+                        forecast_block_for(all_d, qty_assumed)),
                     "date_min": str(all_d["order_date"].min().date()), "date_max": str(all_d["order_date"].max().date()),
                     "note": "Combined across sales files; products unified by name. Per-file forecasts are in each file's card."}
 

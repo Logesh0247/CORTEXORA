@@ -4,12 +4,95 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar, Cell, PieChart, Pie, Legend, ComposedChart, Line } from "recharts";
 import { api, money, useFetch } from "@/lib/api";
-import { PageHead, KpiCard, ChartCard, Loading, ErrorBox, DataTable } from "@/components/ui";
+import { PageHead, KpiCard, ChartCard, Loading, ErrorBox, DataTable, Tabs } from "@/components/ui";
 
 const CATS = ["Electronics", "Apparel", "Home", "Beauty"], REGS = ["North", "South", "East", "West"], CHANS = ["Online", "Store", "Marketplace"];
 const COLORS = ["#38bdf8", "#818cf8", "#34d399", "#fbbf24", "#fb7185", "#22d3ee"];
 const hour = new Date().getHours();
 const GREET = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+
+const STAGES = ["1 · Understand", "2 · Discover", "3 · Predict", "4 · Test decisions", "5 · Recommend"];
+function IntelReport({ intel }: { intel: any }) {
+  const [tab, setTab] = useState(STAGES[0]);
+  if (!intel) return null;
+  const u = intel.understand, di = intel.discover, pr = intel.predict, te = intel.test_decisions, recs = intel.recommendations || [];
+  const moneyL = (v: any) => money(Number(v) || 0);
+  return (<div className="card p-4 mt-4" style={{ borderColor: "var(--a)" }}>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h4 className="font-bold text-[15px]">🧠 Business Intelligence from your data</h4>
+      <Tabs tabs={STAGES} active={tab} onChange={setTab} />
+    </div>
+    <p className="mut text-[12.5px] mt-1">Five stages, computed only from the uploaded file(s). Estimates and heuristics are labelled; anything your data can't support says why.</p>
+
+    {tab === STAGES[0] && (<div className="mt-3">
+      <p className="text-sm"><b>{u.period.from} → {u.period.to}</b> · {u.period.rows.toLocaleString()} line rows · {u.period.products} products · {u.period.customers} customers. Worst category by margin: <b>{u.worst_category?.category}</b> ({((u.worst_category?.margin || 0) * 100).toFixed(1)}%).</p>
+      <div className="grid gap-4 mt-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
+        <ChartCard title="🏆 Top products by revenue" sub="Observed facts from your file">
+          <DataTable rows={u.top_products} pageSize={6} columns={[
+            { k: "product_name", label: "Product" }, { k: "revenue", label: "Revenue", fmt: moneyL },
+            { k: "profit", label: "Profit", fmt: moneyL }, { k: "margin", label: "Margin", fmt: (v: number) => (v * 100).toFixed(1) + "%" }]} /></ChartCard>
+        <ChartCard title="⚠️ Poor performers" sub="Margin under 5% or losing money — stage 2 explains why">
+          {u.poor_performers?.length ? <DataTable rows={u.poor_performers} pageSize={6} columns={[
+            { k: "product_name", label: "Product" }, { k: "margin", label: "Margin", fmt: (v: number) => (v * 100).toFixed(1) + "%" },
+            { k: "profit", label: "Profit", fmt: moneyL }, { k: "reason", label: "Flag" }]} />
+            : <p className="mut text-sm">No poor performers — every product clears a 5% margin. ✅</p>}
+          {!!u.declining_products?.length && <p className="text-[13px] mt-2">Declining (revenue −20%+ between halves): {u.declining_products.map((x: any) => `${x.product_name} (${x.change_pct}%)`).join(", ")}</p>}
+        </ChartCard>
+      </div></div>)}
+
+    {tab === STAGES[1] && (<div className="mt-3">
+      <div className="flex flex-wrap gap-2 text-[12px] mb-3">{Object.entries(di.bridge).map(([k, v]: any) => (
+        <span key={k} className="chip" style={{ cursor: "default" }}><b>{k}</b>: {k === "margin" || k === "avg_discount" ? (v.recent * 100).toFixed(1) + "%" : Math.round(v.recent).toLocaleString()}
+          {v.change_pct !== null && <span style={{ color: v.change_pct >= 0 ? "var(--good)" : "var(--bad)", fontWeight: 800 }}> ({v.change_pct > 0 ? "+" : ""}{v.change_pct}%)</span>}</span>))}
+        <span className="chip" style={{ cursor: "default" }}>halves split at {di.split_date}</span></div>
+      {di.findings.map((f: string) => <p key={f} className="text-sm py-1" style={{ borderBottom: "1px solid var(--line)" }}>🔎 {f}</p>)}
+      <div className="grid gap-4 mt-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
+        <ChartCard title="Profit drivers — products" sub="Profit change, recent half minus prior half ($)">
+          {di.profit_drivers_products.map((x: any) => (<div key={x.name} className="flex justify-between text-[13px] py-1" style={{ borderBottom: "1px solid var(--line)" }}>
+            <span>{x.name}</span><b style={{ color: x.profit_delta >= 0 ? "var(--good)" : "var(--bad)" }}>{x.profit_delta >= 0 ? "+" : ""}{moneyL(x.profit_delta)}</b></div>))}</ChartCard>
+        <ChartCard title="Customer segments (from your file)" sub="Recency of last purchase vs your latest date">
+          <p className="text-sm">Repeat customers: <b>{(di.segments.repeat_share * 100).toFixed(0)}%</b> · inactive 90+ days: <b>{di.segments.at_risk}</b> ({(di.segments.at_risk_share * 100).toFixed(0)}%, worth {moneyL(di.segments.at_risk_monetary)} historically).</p>
+        </ChartCard>
+      </div></div>)}
+
+    {tab === STAGES[2] && (<div className="mt-3">
+      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
+        <div className="card p-4" style={{ background: "var(--panel2)" }}><h3 className="font-bold">🔮 Next 8 weeks</h3>
+          {pr.forecast?.available ? <p className="text-sm mt-1">Predicted revenue <b>{moneyL(pr.forecast.predicted_revenue_8w)}</b>{pr.forecast.predicted_units_8w ? <> · {Math.round(pr.forecast.predicted_units_8w).toLocaleString()} units</> : ""}. Model WAPE {(pr.forecast.model_wape * 100).toFixed(1)}% vs baseline {(pr.forecast.baseline_wape * 100).toFixed(1)}% — {pr.forecast.model_beats_baseline ? "model beats baseline ✅" : "baseline wins, indicative only ⚠️"} (chart in the combined panel above).</p>
+            : <p className="text-sm mt-1" style={{ color: "var(--warn)" }}>{pr.forecast?.reason}</p>}
+          {!!pr.demand_rising?.length && <p className="text-[13px] mt-2">Fast-rising demand: {pr.demand_rising.map((x: any) => `${x.product_name} (+${x.growth_pct}%)`).join(", ")}</p>}
+        </div>
+        <div className="card p-4" style={{ background: "var(--panel2)" }}><h3 className="font-bold">👥 Customers who might leave</h3>
+          <p className="mut text-[12px]">{pr.churn_risk.method}</p>
+          <p className="text-sm mt-1"><b>{pr.churn_risk.at_risk}</b> of {pr.churn_risk.customers} customers inactive 90+ days ({moneyL(pr.churn_risk.at_risk_monetary)} historical revenue).</p>
+          {pr.churn_risk.top_at_risk?.slice(0, 5).map((x: any) => <p key={x.customer_id} className="text-[13px] py-0.5">Customer {x.customer_id} — {x.days_since_last_order}d ago · {moneyL(x.historical_revenue)} · {x.orders} orders</p>)}
+        </div>
+        <div className="card p-4" style={{ background: "var(--panel2)" }}><h3 className="font-bold">📦 Stockout risk</h3>
+          <p className="text-sm mt-1" style={{ color: "var(--warn)" }}>⚠️ Not computed — {pr.stockout_risk.reason}</p></div>
+      </div></div>)}
+
+    {tab === STAGES[3] && (<div className="mt-3">
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))" }}>
+        {te.scenarios.map((sc: any) => (<div key={sc.name} className="card p-3.5">
+          <div className="font-bold text-sm">{sc.name}</div>
+          {sc.note && <p className="mut text-[13px] mt-1">{sc.note}</p>}
+          {sc.projected_revenue !== null && sc.projected_revenue !== undefined && <p className="text-sm mt-1">Projected revenue <b>{moneyL(sc.projected_revenue)}</b> ({sc.revenue_change_pct > 0 ? "+" : ""}{sc.revenue_change_pct}%) · profit <b>{moneyL(sc.projected_profit)}</b></p>}
+          {sc.units_to_cover_4w !== undefined && <p className="text-sm mt-1">Order <b>{sc.units_to_cover_4w.toLocaleString()} units</b> ≈ {moneyL(sc.estimated_cost)} at your average unit cost.</p>}
+          {sc.assumption && <p className="mut text-[12px] mt-1">Assumption: {sc.assumption}</p>}
+        </div>))}
+      </div>
+      <p className="mut text-[12.5px] mt-2">{te.note}</p></div>)}
+
+    {tab === STAGES[4] && (<div className="mt-3 space-y-2.5">
+      {recs.length ? recs.map((r: any) => (<div key={r.priority} className="card p-3.5 flex gap-3" style={{ alignItems: "flex-start" }}>
+        <span className="chip on" style={{ cursor: "default", flexShrink: 0 }}>#{r.priority}</span>
+        <div><div className="font-bold text-sm">{r.action} {r.expected_impact > 0 && <span style={{ color: "var(--good)" }}>· est. impact {moneyL(r.expected_impact)}</span>}</div>
+          <p className="text-[13px] mt-0.5"><b>Evidence:</b> {r.evidence}</p>
+          <p className="mut text-[12.5px]"><b>Impact basis:</b> {r.impact_basis} · <b>Measure:</b> {r.measure}</p></div></div>))
+        : <p className="mut text-sm">No actions triggered by this data — nothing crossed the poor-performance, decline, or churn thresholds.</p>}
+      <p className="mut text-[12.5px]">{intel.note}</p></div>)}
+  </div>);
+}
 
 function UploadPredict() {
   const [batch, setBatch] = useState<any>(null); const [err, setErr] = useState("");
@@ -85,6 +168,7 @@ function UploadPredict() {
           </ChartCard>
         </div>
         <p className="mut text-[12.5px] mt-2">{c.note}</p>
+        <IntelReport intel={c.intelligence} />
       </div>)}
 
       {(batch.cross_file_links || []).length > 0 && (<div className="card p-3.5 mt-4">
@@ -105,6 +189,7 @@ function UploadPredict() {
               <span className="chip" style={{ cursor: "default" }}>{r.report.rows_used.toLocaleString()} rows · {r.report.date_min} → {r.report.date_max}</span>
               {r.report.rows_dropped > 0 && <span className="chip" style={{ cursor: "default", color: "var(--warn)" }}>{r.report.rows_dropped} dropped (counted)</span>}
               <span className="chip" style={{ cursor: "default" }}>margin {(r.kpis.margin * 100).toFixed(1)}%</span>
+              {r.intelligence?.recommendations?.[0] && <span className="chip" style={{ cursor: "default", color: "var(--a)" }}>🧠 Top action: {r.intelligence.recommendations[0].action}</span>}
               {r.forecast?.available
                 ? <span className="chip on" style={{ cursor: "default" }}>🔮 8w: {money(r.forecast.predicted_revenue_8w)} · WAPE {(r.forecast.model_wape * 100).toFixed(1)}% vs {(r.forecast.baseline_wape * 100).toFixed(1)}% {r.forecast.model_beats_baseline ? "(model wins)" : "(baseline wins)"}</span>
                 : <span className="chip" style={{ cursor: "default" }}>🔮 {r.forecast?.reason || "no forecast"}</span>}
