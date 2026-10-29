@@ -24,19 +24,95 @@ if not DB_PATH.exists():
 orders, items, products, inv, mkt = (load_table(t) for t in ["orders","order_items","products","inventory_snapshots","marketing_spend"])
 df = enrich(orders, items).merge(products[["product_id","category"]], on="product_id")
 
-st.sidebar.title("🧠 CORTEXORA")
-page = st.sidebar.radio("Module", ["Home / Executive Overview","Business Growth","Demand Forecasting","Pricing & Profit Optimization","Customer Intelligence","Marketing Performance","Experiments & Causal Lab","Competitor Intelligence","Decision Intelligence Engine","Data Quality & Monitoring","Reports","Settings & About"])
-st.sidebar.warning("⚠️ Synthetic demo data (seed=42) — not real business results.")
-cats = st.sidebar.multiselect("Category", sorted(df.category.unique()), default=sorted(df.category.unique()))
-dmin, dmax = st.sidebar.date_input("Date range", [df.order_date.min().date(), df.order_date.max().date()])
-f = df[df.category.isin(cats) & df.order_date.between(pd.Timestamp(dmin), pd.Timestamp(dmax))]
-st.caption("CORTEXORA · The Intelligence Engine for Predictive Business Decisions · Predict the Future. Optimize the Present. Engineer Business Growth.")
+# ================= Interactive navigation (grouped, searchable, stateful) =================
+NAV = [
+    ("OVERVIEW", [("🏠", "Home / Executive Overview")]),
+    ("ANALYZE — what happened & why", [("📈", "Business Growth"), ("🎯", "Marketing Performance"), ("🥊", "Competitor Intelligence")]),
+    ("PREDICT & OPTIMIZE — what next", [("🔮", "Demand Forecasting"), ("👥", "Customer Intelligence"), ("💲", "Pricing & Profit Optimization")]),
+    ("DECIDE — what should we do", [("🧠", "Decision Intelligence Engine"), ("🧪", "Experiments & Causal Lab")]),
+    ("SYSTEM", [("🩺", "Data Quality & Monitoring"), ("📄", "Reports"), ("⚙️", "Settings & About")]),
+]
+ALL_PAGES = [pg for _, items_ in NAV for _, pg in items_]
+PAGE_ICON = {pg: ic for _, items_ in NAV for ic, pg in items_}
+PAGE_SECTION = {pg: sec for sec, items_ in NAV for _, pg in items_}
+
+def go(target: str):
+    """Navigate to another module (used by sidebar, KPI cards and shortcuts)."""
+    st.session_state["page"] = target
+    st.session_state["jump_box"] = target  # keep the Jump-to box in sync, or it would override us
+
+def _jump():
+    st.session_state["page"] = st.session_state["jump_box"]
+
+def _reset_filters():
+    import datetime as _dt
+    st.session_state["filter_cats"] = sorted(df.category.unique())
+    st.session_state["filter_regions"] = sorted(df.region.unique())
+    st.session_state["filter_dates"] = [df.order_date.min().date(), df.order_date.max().date()]
+
+if "page" not in st.session_state or st.session_state["page"] not in ALL_PAGES:
+    st.session_state["page"] = "Home / Executive Overview"
+
+st.markdown("""<style>
+.block-container{padding-top:1.2rem}
+.cx-header{background:linear-gradient(90deg,#12233d,#0e2a4a);border:1px solid #23406b;border-radius:10px;padding:12px 18px;margin-bottom:14px;color:#e8eef6}
+.cx-header b{font-size:1.05rem}.cx-pill{background:#1d3a5f;border:1px solid #2f5b8f;border-radius:999px;padding:2px 10px;font-size:.78rem;margin-left:6px;white-space:nowrap}
+.cx-kpi{background:#111c2e;border:1px solid #22385c;border-radius:10px;padding:12px 14px;min-height:86px}
+.cx-kpi .label{font-size:.78rem;color:#9db4d4;text-transform:uppercase;letter-spacing:.04em}
+.cx-kpi .value{font-size:1.35rem;font-weight:700;color:#fff;margin-top:2px}
+.cx-kpi .sub{font-size:.78rem;color:#9db4d4}
+section[data-testid="stSidebar"] .stButton button{justify-content:flex-start;text-align:left}
+.cx-navsec{font-size:.72rem;color:#7f97b5;letter-spacing:.08em;margin:14px 0 2px 0}
+</style>""", unsafe_allow_html=True)
+
+with st.sidebar:
+    st.markdown("## 🧠 CORTEXORA")
+    st.caption("The Intelligence Engine for Predictive Business Decisions")
+    st.selectbox("🔎 Jump to… (type to search)", ALL_PAGES,
+                 index=ALL_PAGES.index(st.session_state["page"]), key="jump_box", on_change=_jump)
+    for section, items_ in NAV:
+        st.markdown(f"<div class='cx-navsec'>{section}</div>", unsafe_allow_html=True)
+        for icon, name in items_:
+            active = st.session_state["page"] == name
+            st.button(f"{icon}  {name}", key=f"nav_{name}", use_container_width=True,
+                      type="primary" if active else "secondary", on_click=go, args=(name,))
+    st.divider()
+    try:
+        _pend = int((load_decisions(DB_PATH).status == "pending").sum())
+    except Exception: _pend = 0
+    st.metric("Pending decisions", _pend)
+    st.caption(f"Data through {df.order_date.max().date()} · {len(df):,} line items")
+    st.warning("⚠️ Synthetic demo data (seed=42) — not real business results.")
+    with st.expander("🎛️ Global filters (apply to every page)", expanded=True):
+        cats = st.multiselect("Category", sorted(df.category.unique()), default=sorted(df.category.unique()), key="filter_cats")
+        dmin, dmax = st.date_input("Date range", [df.order_date.min().date(), df.order_date.max().date()], key="filter_dates")
+        regions = st.multiselect("Region", sorted(df.region.unique()), default=sorted(df.region.unique()), key="filter_regions")
+        st.button("↺ Reset all filters", on_click=_reset_filters, use_container_width=True)
+
+page = st.session_state["page"]
+f = df[df.category.isin(cats) & df.region.isin(regions) & df.order_date.between(pd.Timestamp(dmin), pd.Timestamp(dmax))]
+if f.empty: st.warning("No records match the current filters — widen the category/region/date selection in the sidebar.")
+_pend_n = 0
+try: _pend_n = int((load_decisions(DB_PATH).status == "pending").sum())
+except Exception: pass
+st.markdown(f"""<div class="cx-header"><b>{PAGE_ICON.get(page,'')} {page}</b>
+<span style="color:#9db4d4"> &nbsp;·&nbsp; {PAGE_SECTION.get(page,'')}</span>
+<span class="cx-pill">📅 data → {df.order_date.max().date()}</span>
+<span class="cx-pill">🧠 {_pend_n} pending decisions</span>
+<span class="cx-pill">⚠️ synthetic demo</span></div>""", unsafe_allow_html=True)
 
 if page == "Home / Executive Overview":
-    st.title("Executive Overview"); k = kpis(f)
+    st.title("Executive Overview")
+    st.caption("Predict the Future. Optimize the Present. Engineer Business Growth. — every card below is computed live from the warehouse; shortcuts jump straight into the module behind the number.")
+    k = kpis(f)
     c = st.columns(5)
-    for col, (label, val) in zip(c, [("Revenue",f"${k['revenue']:,.0f}"),("Profit",f"${k['profit']:,.0f}"),("Margin",f"{k['margin']:.1%}"),("Orders",f"{k['orders']:,}"),("AOV",f"${k['aov']:,.2f}")]):
-        col.metric(label, val)
+    for col, (label, val, sub) in zip(c, [("Revenue",f"${k['revenue']:,.0f}","net of discounts"),("Profit",f"${k['profit']:,.0f}","after product cost"),("Margin",f"{k['margin']:.1%}","profit / revenue"),("Orders",f"{k['orders']:,}","distinct orders"),("AOV",f"${k['aov']:,.2f}","revenue / order")]):
+        col.markdown(f"<div class='cx-kpi'><div class='label'>{label}</div><div class='value'>{val}</div><div class='sub'>{sub}</div></div>", unsafe_allow_html=True)
+    s = st.columns(4)
+    s[0].button("📈 Why did this move? → Growth", use_container_width=True, on_click=go, args=("Business Growth",))
+    s[1].button("🔮 What happens next? → Forecast", use_container_width=True, on_click=go, args=("Demand Forecasting",))
+    s[2].button("🧠 What should we do? → Decisions", use_container_width=True, type="primary", on_click=go, args=("Decision Intelligence Engine",))
+    s[3].button("🩺 Can we trust this? → Monitoring", use_container_width=True, on_click=go, args=("Data Quality & Monitoring",))
     st.plotly_chart(px.line(f.groupby("order_date").revenue.sum().reset_index(), x="order_date", y="revenue", title="Revenue trend (actuals)"), use_container_width=True)
     st.subheader("Last 30 days vs previous 30 days"); st.dataframe(period_compare(f), use_container_width=True)
     with sqlite3.connect(DB_PATH) as con: dec = pd.read_sql("SELECT * FROM decisions WHERE status='pending' ORDER BY priority DESC LIMIT 5", con)
