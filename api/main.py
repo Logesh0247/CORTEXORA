@@ -161,7 +161,43 @@ async def upload_analyse(file: UploadFile = File(...), cost_ratio: float = 0.55)
     except ValueError as e: raise HTTPException(422, str(e))
     from cortexora.analytics.metrics import enrich
     d = enrich(frames["orders"], frames["order_items"]).merge(frames["products"][["product_id", "category"]], on="product_id")
-    return {"mode": MODE, "report": report, "kpis": kpis(d),
+    # --- trend + top products (observed facts from the uploaded file) ---
+    d["month"] = d["order_date"].dt.to_period("M").astype(str)
+    trend = rec(d.groupby("month").agg(revenue=("revenue", "sum"), profit=("profit", "sum"),
+                                       units=("qty", "sum"), orders=("order_id", "nunique")).reset_index()
+                .rename(columns={"month": "label"}))
+    by_product = rec(d.groupby(["product_id", "product_name", "category"] if "product_name" in d else ["product_id", "category"])
+                     .agg(revenue=("revenue", "sum"), profit=("profit", "sum"), units=("qty", "sum")).reset_index()
+                     .sort_values("revenue", ascending=False).head(10))
+    # --- prediction: forecast the uploaded file's OWN weekly demand, scored honestly ---
+    forecast_block = None
+    try:
+        from cortexora.models.forecasting import weekly_series, evaluate, forecast_next
+        ws = weekly_series(d)
+        weeks = int(len(ws))
+        avg_unit_revenue = float(d["revenue"].sum() / d["qty"].sum()) if d["qty"].sum() else 0.0
+        if weeks >= 24:
+            ev = evaluate(ws)
+            fcdf = forecast_next(ws, 8)
+            model_wape, base_wape = ev["moving_average_4w"]["WAPE"], ev["seasonal_naive"]["WAPE"]
+            rows = [{"week": str(pd.Timestamp(r.week).date()), "forecast": float(r.forecast),
+                     "lower": float(r.lower), "upper": float(r.upper),
+                     "forecast_revenue": float(r.forecast * avg_unit_revenue)} for r in fcdf.itertuples()]
+            forecast_block = {"available": True, "weeks_of_history": weeks,
+                              "history": [{"week": str(t.date()), "units": float(v)} for t, v in ws.tail(26).items()],
+                              "forecast": rows,
+                              "predicted_units_8w": float(fcdf["forecast"].sum()),
+                              "predicted_revenue_8w": float(fcdf["forecast"].sum() * avg_unit_revenue),
+                              "model_wape": model_wape, "baseline_wape": base_wape,
+                              "model_beats_baseline": bool(model_wape < base_wape),
+                              "method": "4-week moving average vs seasonal-naive baseline, chronological 12-week hold-out (WAPE)"}
+        else:
+            forecast_block = {"available": False, "weeks_of_history": weeks,
+                              "reason": f"Only {weeks} weekly periods in this file — at least ~24 are needed for a forecast with an honest hold-out evaluation. The analysis above still applies."}
+    except Exception as e:  # never fail the whole analysis because prediction is unavailable
+        forecast_block = {"available": False, "weeks_of_history": 0, "reason": f"Forecast unavailable for this file: {e}"}
+    return {"mode": MODE, "report": report, "kpis": kpis(d), "trend": trend, "top_products": by_product,
+            "forecast": forecast_block,
             "by_category": rec(d.groupby("category").agg(revenue=("revenue", "sum"), profit=("profit", "sum")).reset_index()),
             "note": "Analysed in-memory only. To make it the live warehouse, use the Streamlit Upload & Analyse page's load step (same transform, ETL-gated)."}
 
