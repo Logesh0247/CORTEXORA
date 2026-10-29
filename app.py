@@ -13,7 +13,9 @@ from cortexora.analytics.competitor import validate_snapshots, price_gaps
 from cortexora.reports.report import generate_markdown_report
 import numpy as np
 
-st.set_page_config(page_title="CORTEXORA", layout="wide")
+st.set_page_config(page_title="CORTEXORA — Intelligence Engine", page_icon="🧠", layout="wide", initial_sidebar_state="expanded")
+px.defaults.template = "plotly_dark"
+px.defaults.color_discrete_sequence = ["#38bdf8", "#818cf8", "#34d399", "#fbbf24", "#fb7185", "#22d3ee"]
 if not DB_PATH.exists():
     with st.spinner("First run: building the CORTEXORA warehouse from sample data (seed=42)…"):
         from cortexora.config import SAMPLE_DIR
@@ -54,20 +56,51 @@ if "page" not in st.session_state or st.session_state["page"] not in ALL_PAGES:
     st.session_state["page"] = "Home / Executive Overview"
 
 st.markdown("""<style>
-.block-container{padding-top:1.2rem}
-.cx-header{background:linear-gradient(90deg,#12233d,#0e2a4a);border:1px solid #23406b;border-radius:10px;padding:12px 18px;margin-bottom:14px;color:#e8eef6}
-.cx-header b{font-size:1.05rem}.cx-pill{background:#1d3a5f;border:1px solid #2f5b8f;border-radius:999px;padding:2px 10px;font-size:.78rem;margin-left:6px;white-space:nowrap}
-.cx-kpi{background:#111c2e;border:1px solid #22385c;border-radius:10px;padding:12px 14px;min-height:86px}
-.cx-kpi .label{font-size:.78rem;color:#9db4d4;text-transform:uppercase;letter-spacing:.04em}
-.cx-kpi .value{font-size:1.35rem;font-weight:700;color:#fff;margin-top:2px}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+html,body,[class*="css"]{font-family:'Inter',sans-serif}
+.stApp{background:radial-gradient(1200px 500px at 85% -5%,rgba(56,189,248,.16),transparent 60%),radial-gradient(900px 450px at 8% 0%,rgba(129,140,248,.13),transparent 55%),#070d18;color:#e8eef6}
+.block-container{padding-top:.8rem;padding-bottom:2rem;max-width:1500px}
+h1{font-weight:850!important;letter-spacing:-.03em;background:linear-gradient(90deg,#fff,#7dd3fc 55%,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:.1rem}
+h2,h3{font-weight:750!important;letter-spacing:-.015em;color:#f1f6fd}
+p,li,label{color:#c6d3e6}
+section[data-testid="stSidebar"]{background:linear-gradient(180deg,#0a1526,#081020 70%);border-right:1px solid #1d3153}
+section[data-testid="stSidebar"] .stButton button{justify-content:flex-start;text-align:left;border-radius:10px;border:1px solid transparent;padding:.42rem .65rem;font-weight:600;transition:all .15s ease}
+section[data-testid="stSidebar"] .stButton button:hover{border-color:#35619b;transform:translateX(2px)}
+section[data-testid="stSidebar"] button[kind="primary"]{background:linear-gradient(90deg,#0284c7,#4f46e5);border:none;box-shadow:0 4px 18px rgba(56,189,248,.35)}
+.stButton button{border-radius:10px;font-weight:650;border:1px solid #2b4a73;transition:all .15s ease}
+.stButton button:hover{border-color:#38bdf8;box-shadow:0 4px 16px rgba(56,189,248,.22);transform:translateY(-1px)}
+button[kind="primary"]{background:linear-gradient(90deg,#0284c7,#4f46e5)!important;border:none!important}
+div[data-testid="stMetric"]{background:linear-gradient(160deg,#101f36,#0b1626);border:1px solid #223d64;border-radius:12px;padding:10px 14px}
+div[data-testid="stMetric"] label{color:#8fb0d8}
+div[data-testid="stExpander"]{background:#0c1728;border:1px solid #1e3557;border-radius:12px}
+div[data-testid="stDataFrame"]{border:1px solid #1e3557;border-radius:12px;overflow:hidden}
+div[data-baseweb="select"]>div,div[data-baseweb="input"]>div{background:#0d1a2e;border-color:#27466e;border-radius:9px}
+.stTabs [data-baseweb="tab-list"]{gap:6px;background:#0b1728;border:1px solid #1e3557;border-radius:12px;padding:5px}
+.stTabs [data-baseweb="tab"]{border-radius:8px;padding:7px 16px;font-weight:650;color:#a9c0dc}
+.stTabs [aria-selected="true"]{background:linear-gradient(90deg,#0284c7,#4f46e5);color:#fff!important}
+hr{border-color:#1c3355}
+::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#25456e;border-radius:99px}
+.cx-hero{background:linear-gradient(110deg,#0b2447 0%,#123a6e 45%,#2b2a72 100%);border:1px solid #2f5b8f;border-radius:16px;padding:20px 24px;margin:4px 0 14px 0;box-shadow:0 12px 34px rgba(2,10,28,.5)}
+.cx-hero .brand{font-size:1.65rem;font-weight:900;letter-spacing:-.02em;color:#fff}
+.cx-hero .tag{color:#bcd7f7;font-size:.92rem;margin-top:2px}
+.cx-pill{display:inline-block;background:rgba(125,211,252,.14);border:1px solid rgba(125,211,252,.45);color:#d8efff;border-radius:999px;padding:3px 11px;font-size:.75rem;margin:8px 6px 0 0;font-weight:600}
+.cx-kpi{background:linear-gradient(160deg,#122540,#0b1729);border:1px solid #264873;border-radius:14px;padding:16px 16px 13px;min-height:118px;box-shadow:0 8px 22px rgba(0,0,0,.25);transition:all .15s ease}
+.cx-kpi:hover{border-color:#38bdf8;transform:translateY(-2px)}
+.cx-kpi .label{font-size:.72rem;color:#8fb0d8;text-transform:uppercase;letter-spacing:.09em;font-weight:700}
+.cx-kpi .value{font-size:1.55rem;font-weight:850;color:#fff;margin:3px 0 1px}
 .cx-kpi .sub{font-size:.78rem;color:#9db4d4}
-section[data-testid="stSidebar"] .stButton button{justify-content:flex-start;text-align:left}
-.cx-navsec{font-size:.72rem;color:#7f97b5;letter-spacing:.08em;margin:14px 0 2px 0}
+.cx-kpi .up{color:#34d399;font-weight:700}.cx-kpi .down{color:#fb7185;font-weight:700}
+.cx-card{background:linear-gradient(165deg,#101f36,#0a1524);border:1px solid #223d64;border-radius:14px;padding:16px 18px;min-height:120px}
+.cx-card h4{margin:0 0 6px 0;color:#fff}.cx-card p{color:#a9c0dc;font-size:.88rem;margin:0}
+.cx-navsec{font-size:.7rem;color:#7f97b5;letter-spacing:.1em;font-weight:800;margin:15px 0 3px 0}
+.cx-brand{background:linear-gradient(120deg,#0e2c52,#232064);border:1px solid #2f5b8f;border-radius:14px;padding:14px 16px;margin-bottom:6px}
+.cx-brand .b{font-size:1.25rem;font-weight:900;color:#fff;letter-spacing:.02em}
+.cx-brand .s{font-size:.74rem;color:#a9cdf5;line-height:1.35}
 </style>""", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.markdown("## 🧠 CORTEXORA")
-    st.caption("The Intelligence Engine for Predictive Business Decisions")
+    st.markdown("""<div class="cx-brand"><div class="b">🧠 CORTEXORA</div>
+    <div class="s">The Intelligence Engine for Predictive Business Decisions<br><i>Predict the Future. Optimize the Present. Engineer Business Growth.</i></div></div>""", unsafe_allow_html=True)
     st.selectbox("🔎 Jump to… (type to search)", ALL_PAGES,
                  index=ALL_PAGES.index(st.session_state["page"]), key="jump_box", on_change=_jump)
     for section, items_ in NAV:
@@ -90,35 +123,71 @@ with st.sidebar:
         st.button("↺ Reset all filters", on_click=_reset_filters, use_container_width=True)
 
 page = st.session_state["page"]
+_q = st.columns([1,1,1,1,3])
+_q[0].button("🏠 Overview", key="top_home", use_container_width=True, on_click=go, args=("Home / Executive Overview",))
+_q[1].button("🔮 Forecast", key="top_fc", use_container_width=True, on_click=go, args=("Demand Forecasting",))
+_q[2].button("🧠 Decisions", key="top_dec", use_container_width=True, type="primary", on_click=go, args=("Decision Intelligence Engine",))
+_q[3].button("📄 Reports", key="top_rep", use_container_width=True, on_click=go, args=("Reports",))
+_q[4].caption("Quick nav — or use the grouped sidebar / Jump-to search. Filters on the left apply everywhere.")
 f = df[df.category.isin(cats) & df.region.isin(regions) & df.order_date.between(pd.Timestamp(dmin), pd.Timestamp(dmax))]
 if f.empty: st.warning("No records match the current filters — widen the category/region/date selection in the sidebar.")
 _pend_n = 0
 try: _pend_n = int((load_decisions(DB_PATH).status == "pending").sum())
 except Exception: pass
-st.markdown(f"""<div class="cx-header"><b>{PAGE_ICON.get(page,'')} {page}</b>
-<span style="color:#9db4d4"> &nbsp;·&nbsp; {PAGE_SECTION.get(page,'')}</span>
-<span class="cx-pill">📅 data → {df.order_date.max().date()}</span>
+st.markdown(f"""<div class="cx-hero"><div class="brand">{PAGE_ICON.get(page,'')} {page}</div>
+<div class="tag">{PAGE_SECTION.get(page,'')} · CORTEXORA Intelligence Engine</div>
+<span class="cx-pill">📅 Data through {df.order_date.max().date()}</span>
 <span class="cx-pill">🧠 {_pend_n} pending decisions</span>
-<span class="cx-pill">⚠️ synthetic demo</span></div>""", unsafe_allow_html=True)
+<span class="cx-pill">🗂️ {len(f):,} records in scope</span>
+<span class="cx-pill">⚠️ Synthetic demo data</span></div>""", unsafe_allow_html=True)
 
 if page == "Home / Executive Overview":
     st.title("Executive Overview")
-    st.caption("Predict the Future. Optimize the Present. Engineer Business Growth. — every card below is computed live from the warehouse; shortcuts jump straight into the module behind the number.")
-    k = kpis(f)
+    st.caption("Every number below is computed live from the warehouse for the current filters. Use the tabs to explore, then jump into the module behind any number.")
+    k = kpis(f); pc0 = period_compare(f).set_index("metric")
+    def _delta(metric):
+        v = pc0.loc[metric, "change_pct"]; cls = "up" if v >= 0 else "down"; arrow = "▲" if v >= 0 else "▼"
+        return f"<span class='{cls}'>{arrow} {abs(v):.1f}%</span> vs prior 30d"
+    cards = [("Revenue", f"${k['revenue']:,.0f}", _delta("revenue")), ("Profit", f"${k['profit']:,.0f}", _delta("profit")),
+             ("Margin", f"{k['margin']:.1%}", "profit / revenue"), ("Orders", f"{k['orders']:,}", _delta("orders")),
+             ("Avg order value", f"${k['aov']:,.2f}", _delta("aov"))]
     c = st.columns(5)
-    for col, (label, val, sub) in zip(c, [("Revenue",f"${k['revenue']:,.0f}","net of discounts"),("Profit",f"${k['profit']:,.0f}","after product cost"),("Margin",f"{k['margin']:.1%}","profit / revenue"),("Orders",f"{k['orders']:,}","distinct orders"),("AOV",f"${k['aov']:,.2f}","revenue / order")]):
+    for col, (label, val, sub) in zip(c, cards):
         col.markdown(f"<div class='cx-kpi'><div class='label'>{label}</div><div class='value'>{val}</div><div class='sub'>{sub}</div></div>", unsafe_allow_html=True)
     s = st.columns(4)
     s[0].button("📈 Why did this move? → Growth", use_container_width=True, on_click=go, args=("Business Growth",))
     s[1].button("🔮 What happens next? → Forecast", use_container_width=True, on_click=go, args=("Demand Forecasting",))
     s[2].button("🧠 What should we do? → Decisions", use_container_width=True, type="primary", on_click=go, args=("Decision Intelligence Engine",))
     s[3].button("🩺 Can we trust this? → Monitoring", use_container_width=True, on_click=go, args=("Data Quality & Monitoring",))
-    st.plotly_chart(px.line(f.groupby("order_date").revenue.sum().reset_index(), x="order_date", y="revenue", title="Revenue trend (actuals)"), use_container_width=True)
-    st.subheader("Last 30 days vs previous 30 days"); st.dataframe(period_compare(f), use_container_width=True)
-    with sqlite3.connect(DB_PATH) as con: dec = pd.read_sql("SELECT * FROM decisions WHERE status='pending' ORDER BY priority DESC LIMIT 5", con)
-    st.subheader("Top pending recommendations")
-    if len(dec): st.dataframe(dec[["area","problem","action","priority"]], use_container_width=True)
-    else: st.info("No pending recommendations — visit the Decision Intelligence Engine.")
+    # Insight cards computed from the filtered data
+    if len(f):
+        by_cat = f.groupby("category").revenue.sum(); top_cat = by_cat.idxmax()
+        by_reg = f.groupby("region").revenue.sum(); top_reg = by_reg.idxmax()
+        low_margin = f.groupby("category").apply(lambda g: g.profit.sum()/g.revenue.sum() if g.revenue.sum() else 0).idxmin()
+        ic = st.columns(3)
+        ic[0].markdown(f"<div class='cx-card'><h4>🏆 Top category</h4><p><b style='color:#fff'>{top_cat}</b> drives ${by_cat.max():,.0f} ({by_cat.max()/by_cat.sum():.0%} of in-scope revenue).</p></div>", unsafe_allow_html=True)
+        ic[1].markdown(f"<div class='cx-card'><h4>🗺️ Strongest region</h4><p><b style='color:#fff'>{top_reg}</b> leads with ${by_reg.max():,.0f} in revenue.</p></div>", unsafe_allow_html=True)
+        ic[2].markdown(f"<div class='cx-card'><h4>⚠️ Margin watch</h4><p><b style='color:#fff'>{low_margin}</b> has the thinnest margin in scope — see Pricing & Profit Optimization before discounting further.</p></div>", unsafe_allow_html=True)
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Performance trend", "🧩 Segments", "🔁 Period comparison", "🧠 Needs your decision"])
+    with tab1:
+        trend = f.groupby("order_date").agg(revenue=("revenue","sum"), profit=("profit","sum")).reset_index()
+        fig = px.area(trend, x="order_date", y="revenue", title="Revenue trend (actuals)")
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=10,r=10,t=40,b=10))
+        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(px.line(trend, x="order_date", y="profit", title="Profit trend (actuals)"), use_container_width=True)
+    with tab2:
+        a, b = st.columns(2)
+        a.plotly_chart(px.bar(f.groupby("category").agg(revenue=("revenue","sum"),profit=("profit","sum")).reset_index(), x="category", y=["revenue","profit"], barmode="group", title="Category"), use_container_width=True)
+        b.plotly_chart(px.pie(f.groupby("region").revenue.sum().reset_index(), names="region", values="revenue", hole=.45, title="Revenue share by region"), use_container_width=True)
+    with tab3:
+        st.dataframe(period_compare(f), use_container_width=True)
+        st.caption("Current 30 days vs the preceding 30 days, using the shared metric definitions (docs/03).")
+    with tab4:
+        with sqlite3.connect(DB_PATH) as con: dec = pd.read_sql("SELECT * FROM decisions WHERE status='pending' ORDER BY priority DESC LIMIT 5", con)
+        if len(dec):
+            st.dataframe(dec[["area","problem","action","priority"]], use_container_width=True)
+            st.button("Review & decide → Decision Engine", type="primary", on_click=go, args=("Decision Intelligence Engine",))
+        else: st.info("No pending recommendations — generate them in the Decision Intelligence Engine.")
 
 elif page == "Business Growth":
     st.title("Business Growth Intelligence"); k = kpis(f); st.json({k2: round(float(v),2) for k2,v in k.items()})
