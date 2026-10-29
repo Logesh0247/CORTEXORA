@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { Bot, X, Send, Plus, Copy, ThumbsUp, ThumbsDown, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 
+const NAV_HREF: Record<string, string> = { "Demand Forecasting": "/forecasting", "Customer Intelligence": "/customers", "Marketing Intelligence": "/marketing", "Decision Intelligence": "/decisions", "Business Growth": "/growth", "Pricing & Profitability": "/pricing", "Data & Model Health": "/health", "Executive Intelligence": "/executive" };
 const PAGE_PROMPTS: Record<string, string[]> = {
   "/forecasting": ["Forecast Electronics demand", "Which products may stock out?", "Can I trust this forecast?"],
   "/customers": ["Which customers are at churn risk?", "What is churn?", "Summarize the key insights."],
@@ -11,6 +12,7 @@ const PAGE_PROMPTS: Record<string, string[]> = {
   "/decisions": ["What should we prioritize today?", "What should we do next?", "Explain the largest change."],
   "/health": ["Can I trust this forecast?", "How much data do we have?", "What is PSI?"],
 };
+const askRef = { current: (_q: string) => {} };
 const DEFAULT_PROMPTS = ["What is our revenue and profit?", "Why did revenue change?", "Find the biggest opportunity.", "What should we do next?"];
 
 export default function Copilot() {
@@ -25,9 +27,12 @@ export default function Copilot() {
   useEffect(() => { boxRef.current?.scrollTo(0, 1e7); }, [msgs, open]);
   useEffect(() => {
     const f = () => setOpen(true);
-    window.addEventListener("cx-open-copilot", f); return () => window.removeEventListener("cx-open-copilot", f);
+    const fq = (e: any) => { setOpen(true); if (e.detail) setTimeout(() => askRef.current(e.detail), 60); };
+    window.addEventListener("cx-open-copilot", f); window.addEventListener("cx-ask-copilot", fq);
+    return () => { window.removeEventListener("cx-open-copilot", f); window.removeEventListener("cx-ask-copilot", fq); };
   }, []);
   const prompts = PAGE_PROMPTS[path] || DEFAULT_PROMPTS;
+  askRef.current = ask;
   async function ask(q: string) {
     if (!q.trim() || busy) return;
     setMsgs((m) => [...m, { role: "user", text: q, ts: new Date().toLocaleTimeString() }]);
@@ -69,7 +74,7 @@ export default function Copilot() {
                 <button title="Helpful"><ThumbsUp size={12} /></button><button title="Not helpful"><ThumbsDown size={12} /></button>
                 {m.mode && <span>· {m.mode}</span>}</>)}
             </div></div>))}
-        {busy && <div className="msg-bot p-3 rounded-xl text-sm mut mr-4">Computing from the warehouse…</div>}
+        {busy && <div className="msg-bot p-3 text-sm mut mr-4" role="status"><span className="tdot" /> <span className="tdot" /> <span className="tdot" /> <span className="ml-1.5">Computing from the warehouse…</span></div>}
       </div>
       <div className="flex gap-2 p-3" style={{ borderTop: "1px solid var(--line)" }}>
         <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ask(input)}

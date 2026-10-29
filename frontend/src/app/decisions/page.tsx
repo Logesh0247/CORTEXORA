@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { api, money, useFetch } from "@/lib/api";
-import { PageHead, KpiCard, ChartCard, Loading, ErrorBox, Empty } from "@/components/ui";
+import { PageHead, KpiCard, ChartCard, Loading, ErrorBox, Empty, toast } from "@/components/ui";
 
 const AREA_LINK: Record<string, string> = { Inventory: "/forecasting", Marketing: "/marketing", Customer: "/customers", Pricing: "/pricing" };
 export default function Decisions() {
@@ -13,12 +13,12 @@ export default function Decisions() {
   const decs = data.decisions || [], by = (s: string) => decs.filter((d: any) => d.status === s).length;
   const os = data.outcome_summary || {};
   async function act(rid: string, status: string) {
-    try { await api(`/api/decisions/${rid}/status`, { method: "POST", body: JSON.stringify({ status, owner }) }); setMsg(`Saved: ${rid} → ${status}`); refetch(); }
+    try { await api(`/api/decisions/${rid}/status`, { method: "POST", body: JSON.stringify({ status, owner }) }); setMsg(`Saved: ${rid} → ${status}`); toast(`Decision ${status}: ${rid}`); refetch(); }
     catch (e: any) { setMsg("⚠️ " + e.message); }
   }
   async function record(rid: string) {
     if (!note) { setMsg("⚠️ A measurement note is required — an outcome without a source is not evidence."); return; }
-    try { await api(`/api/decisions/${rid}/outcome`, { method: "POST", body: JSON.stringify({ actual, note, owner }) }); setMsg(`Outcome recorded for ${rid}`); setSel(null); refetch(); }
+    try { await api(`/api/decisions/${rid}/outcome`, { method: "POST", body: JSON.stringify({ actual, note, owner }) }); setMsg(`Outcome recorded for ${rid}`); toast(`Outcome recorded: ${rid}`); setSel(null); refetch(); }
     catch (e: any) { setMsg("⚠️ " + e.message); }
   }
   return (<div>

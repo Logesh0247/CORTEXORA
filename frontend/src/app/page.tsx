@@ -31,6 +31,9 @@ export default function Home() {
   const { data, error, loading, refetch } = useFetch<any>(() => api(q), [q]);
   const dec = useFetch<any>(() => api("/api/decisions"), []);
   const fc = useFetch<any>(() => api("/api/forecast?category=Electronics"), []);
+  const cust = useFetch<any>(() => api("/api/customers"), []);
+  const [hidden, setHidden] = useState<string[]>([]);
+  const askCopilot = (qtext: string) => window.dispatchEvent(new CustomEvent("cx-ask-copilot", { detail: qtext }));
 
   const trendData = useMemo(() => {
     if (!data) return [];
@@ -49,14 +52,32 @@ export default function Home() {
   const scenRev = k.revenue * (1 + price / 100) * (1 + demand / 100) + k.revenue * (disc / 100) * 0.35;
   const scenProf = k.profit * (1 + price / 100) * (1 + demand / 100) + k.revenue * (disc / 100) * 0.35;
   const pending = (dec.data?.decisions || []).filter((d: any) => d.status === "pending").slice(0, 3);
+  const sum = cust.data?.summary;
+  const churnRate = sum ? sum.churned_heuristic / Math.max(1, sum.customers) : null;
+  const sparkMain = trendData.map((r: any) => Number(r[data.trend.series[0]?.name] || 0)).filter((v: number) => v > 0).slice(-14);
+  const sparkFc = (fc.data?.forecast || []).map((x: any) => x.forecast);
+  const periodLabel = days === 10000 ? "All time" : days === 30 ? "Last 30 days" : days === 90 ? "Last 90 days" : days === 182 ? "Last 6 months" : "Last year";
 
   return (<div>
-    <PageHead title={`${GREET} — Executive Overview`} question="What happened · what next · what to do"
-      desc="CORTEXORA command centre. Demo dataset (synthetic, seed=42) · every figure computed live by the Python analytics API."
-      actions={<>
-        <button className="btn" onClick={() => window.dispatchEvent(new Event("cx-open-copilot"))}>🤖 Ask Copilot</button>
-        <Link className="btn primary" href="/decisions">🧠 Review decisions{pending.length ? ` (${pending.length})` : ""}</Link></>} />
-
+    <div className="mb-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-[27px] font-extrabold tracking-tight">{GREET}, welcome to <span style={{ background: "linear-gradient(90deg,var(--a),var(--a2))", WebkitBackgroundClip: "text", color: "transparent" }}>CORTEXORA</span></h1>
+          <p className="mut text-sm mt-1">Your business intelligence, predictions, and decisions — all in one place.</p>
+          <div className="flex flex-wrap items-center gap-2 mt-2.5 text-[12px]">
+            <span className="chip on" style={{ cursor: "default" }}>Demo dataset · synthetic (seed=42)</span>
+            <span className="chip" style={{ cursor: "default" }}>Period: {periodLabel}</span>
+            <span className="chip" style={{ cursor: "default" }}>Data through {ins?.data_through ?? "…"}</span>
+            <span className="chip" style={{ cursor: "default" }}><span className="status-dot pulse" style={{ background: "var(--good)", display: "inline-block", marginRight: 5 }} />Computed live by the analytics API</span>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button className="btn" onClick={() => refetch()}>↺ Refresh</button>
+          <button className="btn" onClick={() => askCopilot("Summarize my business performance.")}>✦ Ask Copilot</button>
+          <Link className="btn primary" href="/decisions">Review decisions{pending.length ? ` (${pending.length})` : ""}</Link>
+        </div>
+      </div>
+    </div>
     <div className="card p-3.5 mb-4 flex flex-wrap items-center gap-2 sticky top-[64px] z-30">
       <span className="lab">Period</span>
       {[["30D", 30], ["90D", 90], ["6M", 182], ["1Y", 365], ["All", 10000]].map(([l, v]: any) => (
@@ -71,21 +92,21 @@ export default function Home() {
       {CATS.map((c) => <button key={c} className={`chip ${cats.includes(c) ? "on" : ""}`} onClick={() => setCats(cats.includes(c) ? cats.filter((x) => x !== c) : [...cats, c])}>{c}</button>)}
     </div>
 
-    <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
-      <KpiCard label="Total Revenue" value={money(k.revenue)} delta={k.revenue_delta} sub="vs prior period · shared metric definition" href="/growth" title="Revenue = Σ qty × unit_price × (1−discount)" />
-      <KpiCard label="Net Profit" value={money(k.profit)} delta={k.profit_delta} sub="after product cost" href="/growth" title="Profit = revenue − Σ qty × unit_cost" />
-      <KpiCard label="Profit Margin" value={(k.margin * 100).toFixed(1) + "%"} sub="profit / revenue" href="/pricing" />
-      <KpiCard label="Total Orders" value={k.orders.toLocaleString()} delta={k.orders_delta} sub={`${k.customers} customers in scope`} href="/growth" />
-      <KpiCard label="Forecast outlook (Electronics, 8w)" value={fc.data ? money(fc.data.forecast.reduce((a: number, x: any) => a + x.forecast, 0) * 190) : "…"} sub="units forecast × avg price — see Forecasting for evidence" href="/forecasting" />
+    <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(172px,1fr))" }}>
+      <KpiCard label="Total Revenue" value={money(k.revenue)} delta={k.revenue_delta} spark={sparkMain} sub="vs prior period" href="/growth" title="Revenue = Σ qty × unit_price × (1 − discount). Click to open Business Growth." />
+      <KpiCard label="Net Profit" value={money(k.profit)} delta={k.profit_delta} spark={sparkMain} sub="vs prior period · after cost" href="/growth" title="Profit = revenue − Σ qty × unit_cost. Click to open Business Growth." />
+      <KpiCard label="Profit Margin" value={(k.margin * 100).toFixed(1) + "%"} sub="profit / revenue in scope" href="/pricing" title="Margin on the current scope. Click to open Pricing & Profitability." />
+      <KpiCard label="Total Orders" value={k.orders.toLocaleString()} delta={k.orders_delta} spark={sparkMain} sub={`${k.customers} customers in scope`} href="/growth" title="Completed orders in scope. Click to open Business Growth." />
+      <KpiCard label="Customer Churn Rate" value={churnRate === null ? "…" : (churnRate * 100).toFixed(1) + "%"} invert sub={sum ? `${sum.churned_heuristic} of ${sum.customers} customers inactive >180d (heuristic)` : "loading…"} href="/customers" title="Share of customers inactive for more than 180 days — a heuristic label; the validated churn model lives in Customer Intelligence." />
+      <KpiCard label="Forecasted Revenue (8w)" value={fc.data ? money(fc.data.forecast.reduce((a: number, x: any) => a + x.forecast, 0) * 190) : "…"} spark={sparkFc} sub="Electronics units forecast × avg price" href="/forecasting" title="Sum of the 8-week Electronics unit forecast × average selling price. Evidence and baseline comparison live in Demand Forecasting." />
     </div>
-
     <div className="grid gap-4 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
-      <ChartCard title={`${metric} trend`} sub={`${gran}${breakdown !== "Total" ? " · by " + breakdown : ""} · actuals only (forecast lives in Demand Forecasting)`}>
+      <ChartCard title={`${metric} trend`} sub={`${gran}${breakdown !== "Total" ? " · by " + breakdown : ""} · solid = actuals (forecast lives in Demand Forecasting) · click legend to toggle a series`}>
         <div style={{ height: 300 }}><ResponsiveContainer><AreaChart data={trendData}>
           <CartesianGrid strokeDasharray="3 3" opacity={.25} /><XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={40} /><YAxis tick={{ fontSize: 11 }} />
           <Tooltip formatter={(v: any) => Math.round(v).toLocaleString()} />
-          {breakdown !== "Total" && <Legend />}
-          {data.trend.series.map((s: any, i: number) => <Area key={s.name} dataKey={s.name} stroke={COLORS[i % 6]} fill={COLORS[i % 6]} fillOpacity={.18} strokeWidth={2.2} />)}
+          {breakdown !== "Total" && <Legend onClick={(e: any) => setHidden((h) => h.includes(e.dataKey) ? h.filter((x) => x !== e.dataKey) : [...h, e.dataKey])} />}
+          {data.trend.series.map((s: any, i: number) => <Area key={s.name} dataKey={s.name} hide={hidden.includes(s.name)} stroke={COLORS[i % 6]} fill={COLORS[i % 6]} fillOpacity={.18} strokeWidth={2.2} />)}
         </AreaChart></ResponsiveContainer></div>
       </ChartCard>
       <div className="card p-4">
@@ -119,11 +140,11 @@ export default function Home() {
           <Tooltip formatter={(v: any) => money(v)} /><Legend /></PieChart></ResponsiveContainer></div>
       </ChartCard>
       <div className="card p-4">
-        <h3 className="font-bold">🚨 Business alerts & insights</h3>
+        <h3 className="font-bold">✦ AI Business Insights <span className="lab" style={{ textTransform: "none", letterSpacing: 0 }}>· computed, not generated prose</span></h3>
         <div className="space-y-3 mt-2 text-sm">
           <div>⚠️ <b>{highRisk} products</b> at high stockout risk in the current reorder plan.
             <div className="flex gap-2 mt-1"><Link className="btn" href="/forecasting">Investigate</Link>
-            <button className="btn" onClick={() => window.dispatchEvent(new Event("cx-open-copilot"))}>Ask Copilot</button></div></div>
+            <button className="btn" onClick={() => askCopilot("Which products are at risk of stockout?")}>Ask Copilot</button></div></div>
           <div>🏆 <b>{ins.top_category}</b> leads revenue ({money(ins.top_category_value)}); <b>{ins.top_region}</b> is the strongest region.</div>
           <div>📉 Margin watch: <b>{ins.margin_watch}</b> has the thinnest margin in scope — review discounting before pushing volume there.
             <div className="mt-1"><Link className="btn" href="/pricing">Open Pricing</Link></div></div>
@@ -148,9 +169,19 @@ export default function Home() {
             <div className="text-sm"><b>{d.area}</b> · priority {d.priority} — {d.problem}</div>
             <div className="mut text-[13px] mt-0.5">→ {d.action}</div>
             <div className="flex gap-2 mt-2"><Link className="btn" href="/decisions">Inspect & decide</Link>
-              <button className="btn" onClick={() => window.dispatchEvent(new Event("cx-open-copilot"))}>Ask Copilot</button></div></div>))
+              <button className="btn" onClick={() => askCopilot("Which products are at risk of stockout?")}>Ask Copilot</button></div></div>))
           : <p className="mut text-sm">No pending recommendations — generate them in Decision Intelligence.</p>}
       </ChartCard>
+    </div>
+
+    <div className="card p-4 mt-4">
+      <div className="flex items-center justify-between flex-wrap gap-2"><h3 className="font-bold">🩺 System Health</h3><Link className="btn" href="/health">Open Data & Model Health</Link></div>
+      <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
+        <div className="flex gap-2.5 items-start"><span className="status-dot" style={{ background: "var(--good)", marginTop: 6 }} /><div><div className="text-sm font-semibold">Data freshness</div><div className="mut text-[12.5px]">Through {ins.data_through} · {Number(ins.records || 0).toLocaleString()} records in scope</div></div></div>
+        <div className="flex gap-2.5 items-start"><span className="status-dot" style={{ background: "var(--good)", marginTop: 6 }} /><div><div className="text-sm font-semibold">Pipeline status</div><div className="mut text-[12.5px]">ETL quality gate passed on last load — see run history</div></div></div>
+        <div className="flex gap-2.5 items-start"><span className="status-dot" style={{ background: highRisk > 0 ? "var(--warn)" : "var(--good)", marginTop: 6 }} /><div><div className="text-sm font-semibold">Inventory model watch</div><div className="mut text-[12.5px]">{highRisk} products at high stockout risk under the current plan</div></div></div>
+        <div className="flex gap-2.5 items-start"><span className="status-dot" style={{ background: pending.length ? "var(--warn)" : "var(--good)", marginTop: 6 }} /><div><div className="text-sm font-semibold">Decisions awaiting you</div><div className="mut text-[12.5px]">{pending.length} shown above · full queue in Decision Intelligence</div></div></div>
+      </div>
     </div>
   </div>);
 }

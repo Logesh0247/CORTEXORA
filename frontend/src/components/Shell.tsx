@@ -2,10 +2,20 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { BrainCircuit, ChevronDown, Menu, Moon, Sun, Bell, Search, Command, X, User } from "lucide-react";
+import { ChevronDown, Menu, Moon, Sun, Bell, Search, Command, X, Settings, FileText, LogOut, Sparkles } from "lucide-react";
 import { NAV, ALL_ROUTES } from "@/lib/nav";
 import Copilot from "./Copilot";
 import { api } from "@/lib/api";
+import { Toaster } from "./ui";
+
+export function LogoMark({ size = 34 }: { size?: number }) {
+  return (<svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true" style={{ flexShrink: 0 }}>
+    <defs><linearGradient id="cxg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#6366f1" /><stop offset="100%" stopColor="#8b7cf6" /></linearGradient></defs>
+    <rect x="1.5" y="1.5" width="37" height="37" rx="11" fill="url(#cxg)" opacity=".16" />
+    <rect x="1.5" y="1.5" width="37" height="37" rx="11" fill="none" stroke="url(#cxg)" strokeWidth="1.4" />
+    <path d="M27.5 14.5A9.5 9.5 0 1 0 27.5 25.5" fill="none" stroke="url(#cxg)" strokeWidth="3.2" strokeLinecap="round" />
+    <circle cx="28.6" cy="20" r="2.4" fill="#22b8d8" /><circle cx="14" cy="13.5" r="1.6" fill="#8b7cf6" opacity=".85" /><circle cx="12.5" cy="26" r="1.6" fill="#6366f1" opacity=".7" /></svg>);
+}
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname() || "/";
@@ -16,6 +26,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [palette, setPalette] = useState(false);
   const [pq, setPq] = useState("");
   const [pending, setPending] = useState(0);
+  const [pendingList, setPendingList] = useState<any[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [profOpen, setProfOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const current = ALL_ROUTES.find((r) => r.href === path);
   const section = NAV.find((g) => g.items.some((i) => i.href === path))?.section || "";
@@ -25,7 +38,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     const d = saved ? saved === "dark" : true;
     setDark(d); document.documentElement.classList.toggle("dark", d);
   }, []);
-  useEffect(() => { api("/api/decisions").then((d) => setPending((d.decisions || []).filter((x: any) => x.status === "pending").length)).catch(() => {}); }, [path]);
+  useEffect(() => { api("/api/decisions").then((d) => { const px = (d.decisions || []).filter((x: any) => x.status === "pending"); setPending(px.length); setPendingList(px.slice(0, 5)); }).catch(() => {}); }, [path]);
+  useEffect(() => { setNotifOpen(false); setProfOpen(false); }, [path]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette(true); }
@@ -42,10 +56,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   const sidebar = (
     <div className="flex flex-col gap-1 p-3" style={{ minHeight: "100%" }}>
-      <Link href="/" className="flex items-center gap-2.5 px-2 py-2 no-underline" style={{ color: "var(--txt)" }}>
-        <span style={{ background: "linear-gradient(120deg,#0e2c52,#232064)", border: "1px solid var(--line)", borderRadius: 11, padding: 7, display: "inline-flex" }}><BrainCircuit size={20} color="#7dd3fc" /></span>
-        {!collapsed && (<span><span className="font-black tracking-wide">CORTEXORA</span><br />
-          <span className="mut" style={{ fontSize: 10.5, lineHeight: 1.25, display: "block" }}>The Intelligence Engine for<br />Predictive Business Decisions</span></span>)}
+      <Link href="/" className="flex items-center gap-2.5 px-1.5 py-2 no-underline" style={{ color: "var(--txt)" }} title="CORTEXORA — Home">
+        <LogoMark size={36} />
+        {!collapsed && (<span style={{ minWidth: 0 }}><span className="font-black tracking-[.14em] text-[15px]">CORTEXORA</span><br />
+          <span className="mut" style={{ fontSize: 10, lineHeight: 1.3, display: "block" }}>The Intelligence Engine for<br />Predictive Business Decisions</span></span>)}
       </Link>
       {NAV.map((g) => (
         <div key={g.section}>
@@ -63,16 +77,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </div>))}
       <div className="mt-auto px-2 pt-4">
         {!collapsed && (<div className="card p-3 text-[12px]">
-          <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: "var(--good)" }} />
+          <span className="status-dot pulse mr-1.5" style={{ background: "var(--good)", display: "inline-block" }} />
           <b>Demo Data</b><div className="mut mt-1">Synthetic dataset (seed=42). Figures are illustrative; calculations are real.</div></div>)}
         <button className="btn w-full mt-2 justify-center" onClick={() => setCollapsed(!collapsed)}>{collapsed ? "»" : "« Collapse"}</button>
       </div>
     </div>);
 
   return (<div className="gridbg" style={{ display: "flex", minHeight: "100vh" }}>
-    <aside className="hidden lg:block" style={{ width: collapsed ? 74 : 252, flexShrink: 0, position: "sticky", top: 0, height: "100vh", overflowY: "auto", borderRight: "1px solid var(--line)", background: "var(--panel2)", transition: "width .18s" }}>{sidebar}</aside>
-    {mobile && (<div style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(0,0,0,.5)" }} onClick={() => setMobile(false)}>
-      <aside style={{ width: 260, height: "100%", background: "var(--panel2)", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>{sidebar}</aside></div>)}
+    <aside className="hidden lg:block" style={{ width: collapsed ? 74 : 256, flexShrink: 0, position: "sticky", top: 0, height: "100vh", overflowY: "auto", borderRight: "1px solid var(--line)", background: "var(--side)", transition: "width .18s" }}>{sidebar}</aside>
+    {mobile && (<div style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(2,6,16,.55)", backdropFilter: "blur(2px)" }} onClick={() => setMobile(false)}>
+      <aside style={{ width: 264, height: "100%", background: "var(--side)", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>{sidebar}</aside></div>)}
     <div style={{ flex: 1, minWidth: 0 }}>
       <header className="flex items-center gap-2.5 px-4 lg:px-6 py-3 sticky top-0 z-40" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)", borderBottom: "1px solid var(--line)" }}>
         <button className="btn lg:hidden" aria-label="Open navigation" onClick={() => setMobile(true)}><Menu size={17} /></button>
@@ -86,13 +100,36 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           title="Global period — updates the Home dashboard">
           <option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="182">Last 6 months</option><option value="365">Last year</option><option value="10000">All time</option></select>
         <span className="chip hidden md:inline-flex" style={{ cursor: "default" }} title="The connected dataset. Upload your own in Data Sources.">🗂️ Demo dataset</span>
-        <button className="btn" aria-label="Notifications — pending decisions" title={`${pending} pending decisions`} onClick={() => router.push("/decisions")} style={{ position: "relative" }}>
-          <Bell size={16} />{pending > 0 && <span style={{ position: "absolute", top: -6, right: -6, background: "var(--bad)", color: "#fff", borderRadius: 999, fontSize: 10, fontWeight: 800, padding: "0 5px" }}>{pending}</span>}</button>
-        <button className="btn" aria-label="Ask Copilot" onClick={() => window.dispatchEvent(new Event("cx-open-copilot"))}>🤖 <span className="hidden md:inline">Copilot</span></button>
-        <button className="btn" aria-label="Toggle theme" onClick={toggleTheme}>{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
-        <button className="btn" aria-label="Profile and settings" onClick={() => router.push("/settings")}><User size={16} /></button>
+        <div style={{ position: "relative" }}>
+          <button className="btn" aria-label="Notifications" aria-haspopup="true" aria-expanded={notifOpen} title="Notifications" onClick={() => { setNotifOpen(!notifOpen); setProfOpen(false); }} style={{ position: "relative" }}>
+            <Bell size={16} />{pending > 0 && <span style={{ position: "absolute", top: -6, right: -6, background: "var(--bad)", color: "#fff", borderRadius: 999, fontSize: 10, fontWeight: 800, padding: "0 5px" }}>{pending}</span>}</button>
+          {notifOpen && (<div className="card p-2" role="menu" style={{ position: "absolute", right: 0, top: 44, width: "min(340px,88vw)", zIndex: 65 }}>
+            <div className="px-2 py-1.5 flex items-center justify-between"><b className="text-sm">Notifications</b><span className="chip on" style={{ cursor: "default" }}>{pending} pending</span></div>
+            {pendingList.length ? pendingList.map((d: any) => (
+              <button key={d.recommendation_id} className="navlink w-full text-left" onClick={() => router.push("/decisions")}>
+                <span className="status-dot" style={{ background: "var(--warn)" }} />
+                <span style={{ minWidth: 0 }}><span className="block text-[13px] font-semibold truncate">{d.area} — action awaiting review</span>
+                  <span className="block mut text-[12px] truncate">{d.problem}</span></span></button>))
+              : <p className="mut text-sm px-2 py-2">All caught up — no pending decisions.</p>}
+            <button className="btn w-full justify-center mt-1" onClick={() => router.push("/decisions")}>Open Decision Intelligence</button>
+          </div>)}
+        </div>
+        <button className="btn primary" aria-label="Ask Copilot" onClick={() => window.dispatchEvent(new Event("cx-open-copilot"))}><Sparkles size={15} /> <span className="hidden md:inline">Copilot</span></button>
+        <button className="btn" aria-label="Toggle theme" title={dark ? "Switch to light theme" : "Switch to dark theme"} onClick={toggleTheme}>{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
+        <div style={{ position: "relative" }}>
+          <button className="btn" aria-label="Profile menu" aria-haspopup="true" aria-expanded={profOpen} onClick={() => { setProfOpen(!profOpen); setNotifOpen(false); }}
+            style={{ width: 34, height: 34, padding: 0, justifyContent: "center", borderRadius: 999, background: "linear-gradient(135deg,var(--a),var(--a2))", color: "#fff", border: "none", fontWeight: 800, fontSize: 13 }}>CX</button>
+          {profOpen && (<div className="card p-2" role="menu" style={{ position: "absolute", right: 0, top: 44, width: 230, zIndex: 65 }}>
+            <div className="px-2 py-1.5"><div className="font-bold text-sm">CORTEXORA Workspace</div><div className="mut text-[12px]">Demo dataset · Analyst role</div></div>
+            <button className="navlink w-full text-left" onClick={() => router.push("/settings")}><Settings size={15} /> Settings & preferences</button>
+            <button className="navlink w-full text-left" onClick={() => router.push("/reports")}><FileText size={15} /> Reports</button>
+            <button className="navlink w-full text-left" onClick={toggleTheme}>{dark ? <Sun size={15} /> : <Moon size={15} />} {dark ? "Light theme" : "Dark theme"}</button>
+            <div className="mut text-[11.5px] px-2 py-1.5" style={{ borderTop: "1px solid var(--line)" }}><LogOut size={11} className="inline mr-1" />Sign-out is disabled in demo mode.</div>
+          </div>)}
+        </div>
       </header>
-      <main className="px-4 lg:px-6 py-5" style={{ maxWidth: 1480, margin: "0 auto" }}>{children}</main>
+      <main className="px-4 lg:px-6 py-5" style={{ maxWidth: 1480, margin: "0 auto" }}><div key={path} className="page-enter">{children}</div></main>
+      <Toaster />
       <footer className="px-6 pb-8 text-center text-[12px] mut">CORTEXORA · Predict the Future. Optimize the Present. Engineer Business Growth. · Demo data — calculations are real, figures illustrative.</footer>
     </div>
     <Copilot />

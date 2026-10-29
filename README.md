@@ -26,6 +26,13 @@ Docker: `docker build -t cortexora . && docker run -p 8501:8501 cortexora`
 
 **Custom web UI (bespoke, fully interactive):** `.venv/bin/python web/server.py` → http://localhost:8502 — a from-scratch single-page dashboard over the same analytics API (see `docs/13_WEB_UI.md`). The Streamlit app above remains the full 13-module product; the web UI is its fast Mission-Control surface.
 
+**Enterprise web app (Next.js + FastAPI, primary UI):**
+```bash
+.venv/bin/uvicorn api.main:app --port 8000          # FastAPI adapter over the same analytics — no recomputed metrics
+cd frontend && npm install && npm run dev           # http://localhost:3000 (proxies /api → :8000)
+```
+15 routed pages (Home, Executive, Growth, Marketing, Customers, Pricing, Forecasting, MMM readiness, Experiments, Decisions, Market Radar, Health, Reports, Data Sources, Settings) with collapsible sidebar, command palette (Ctrl/⌘K), persisted dark/light themes, a backend-routed Copilot drawer (deterministic demo mode — labelled, no LLM key in the frontend), working scenario sliders, approval/outcome workflow, and CSV upload analysis. Synthetic demo data is labelled everywhere. See `docs/15_NEXTJS_UI_ARCHITECTURE.md`.
+
 ## What is implemented (all verified by tests / in-app execution)
 | Area | Capability |
 |---|---|
