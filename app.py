@@ -38,6 +38,45 @@ ALL_PAGES = [pg for _, items_ in NAV for _, pg in items_]
 PAGE_ICON = {pg: ic for _, items_ in NAV for ic, pg in items_}
 PAGE_SECTION = {pg: sec for sec, items_ in NAV for _, pg in items_}
 
+PAGE_META = {
+ "Home / Executive Overview": ("Command centre", "What is happening, what is next, and what needs your decision — in one view."),
+ "Business Growth": ("What happened? Why?", "Revenue, profit and segment drivers using the shared metric definitions."),
+ "Marketing Performance": ("What happened? Why?", "Channel efficiency today, and where the next dollar of budget works hardest."),
+ "Competitor Intelligence": ("External signals", "Compliantly-supplied competitor snapshots vs our prices — never a fake live feed."),
+ "Demand Forecasting": ("What might happen next?", "Demand outlook with measured accuracy, plus the inventory actions it implies."),
+ "Customer Intelligence": ("What might happen next?", "Who your customers are, and who is quietly leaving."),
+ "Pricing & Profit Optimization": ("What should we do?", "Price, discount and break-even scenarios — assumption-based, honestly labelled."),
+ "Decision Intelligence Engine": ("What should we do?", "Evidence-ranked recommendations. You approve; the system tracks whether it worked."),
+ "Experiments & Causal Lab": ("Did it work? What is causal?", "Design and analyse A/B tests and quasi-experiments with proper uncertainty."),
+ "Data Quality & Monitoring": ("Can we trust this?", "Data quality, pipeline health, drift and measured model performance."),
+ "Reports": ("Share it", "Executive reports rendered from the same computed values as these dashboards."),
+ "Settings & About": ("System", "Configuration, metric definitions, pipeline control and project identity."),
+}
+
+def page_intro():
+    q, desc = PAGE_META.get(page, ("", ""))
+    st.title(f"{PAGE_ICON.get(page,'')}  {page}")
+    st.markdown(f"<div class='cx-intro'><span class='cx-q'>{q}</span><span class='cx-desc'>{desc}</span></div>", unsafe_allow_html=True)
+
+def kpi_cards(cards, cols=None):
+    """cards: list of (label, value, sub_html). Renders the gradient KPI strip."""
+    cols = cols or st.columns(len(cards))
+    for col, (label, val, sub) in zip(cols, cards):
+        col.markdown(f"<div class='cx-kpi'><div class='label'>{label}</div><div class='value'>{val}</div><div class='sub'>{sub}</div></div>", unsafe_allow_html=True)
+
+def C(fig, height=None):
+    """Consistent chart styling for every Plotly figure in the app."""
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                      margin=dict(l=8, r=8, t=44, b=8), font=dict(color="#c6d3e6"),
+                      legend=dict(orientation="h", y=1.08, x=0), height=height or 340)
+    fig.update_xaxes(gridcolor="rgba(90,130,180,.14)"); fig.update_yaxes(gridcolor="rgba(90,130,180,.14)")
+    return fig
+
+def delta_html(v, suffix="vs prior 30d"):
+    cls = "up" if v >= 0 else "down"; arrow = "▲" if v >= 0 else "▼"
+    return f"<span class='{cls}'>{arrow} {abs(v):.1f}%</span> {suffix}"
+
+
 def go(target: str):
     """Navigate to another module (used by sidebar, KPI cards and shortcuts)."""
     st.session_state["page"] = target
@@ -96,6 +135,15 @@ hr{border-color:#1c3355}
 .cx-brand{background:linear-gradient(120deg,#0e2c52,#232064);border:1px solid #2f5b8f;border-radius:14px;padding:14px 16px;margin-bottom:6px}
 .cx-brand .b{font-size:1.25rem;font-weight:900;color:#fff;letter-spacing:.02em}
 .cx-brand .s{font-size:.74rem;color:#a9cdf5;line-height:1.35}
+.cx-intro{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:-4px 0 14px 0}
+.cx-q{background:linear-gradient(90deg,#0284c7,#4f46e5);color:#fff;border-radius:999px;padding:4px 13px;font-size:.78rem;font-weight:750;white-space:nowrap}
+.cx-desc{color:#a9c0dc;font-size:.94rem}
+div[data-testid="stVerticalBlockBorderWrapper"]{background:linear-gradient(165deg,rgba(18,35,62,.72),rgba(9,20,36,.72));border-radius:14px!important}
+.stDownloadButton button{border-radius:10px;font-weight:650}
+div[data-testid="stAlert"]{border-radius:12px}
+input[type=number],textarea{border-radius:9px!important}
+.cx-rec{border-left:3px solid #38bdf8;padding:2px 0 2px 10px;margin-bottom:4px}
+.cx-rec .meta{color:#8fb0d8;font-size:.8rem}
 </style>""", unsafe_allow_html=True)
 
 with st.sidebar:
@@ -142,7 +190,7 @@ st.markdown(f"""<div class="cx-hero"><div class="brand">{PAGE_ICON.get(page,'')}
 <span class="cx-pill">⚠️ Synthetic demo data</span></div>""", unsafe_allow_html=True)
 
 if page == "Home / Executive Overview":
-    st.title("Executive Overview")
+    page_intro()
     st.caption("Every number below is computed live from the warehouse for the current filters. Use the tabs to explore, then jump into the module behind any number.")
     k = kpis(f); pc0 = period_compare(f).set_index("metric")
     def _delta(metric):
@@ -190,49 +238,93 @@ if page == "Home / Executive Overview":
         else: st.info("No pending recommendations — generate them in the Decision Intelligence Engine.")
 
 elif page == "Business Growth":
-    st.title("Business Growth Intelligence"); k = kpis(f); st.json({k2: round(float(v),2) for k2,v in k.items()})
-    st.plotly_chart(px.bar(f.groupby("category").agg(revenue=("revenue","sum"),profit=("profit","sum")).reset_index(), x="category", y=["revenue","profit"], barmode="group"), use_container_width=True)
-    st.plotly_chart(px.bar(f.groupby("region").revenue.sum().reset_index(), x="region", y="revenue", title="Revenue by region"), use_container_width=True)
-    st.subheader("Drill-down (filtered records)"); st.dataframe(f.head(500), use_container_width=True)
-    st.download_button("Download filtered CSV", f.to_csv(index=False), "cortexora_filtered.csv")
-
+    page_intro(); k = kpis(f); pcg = period_compare(f).set_index("metric")
+    kpi_cards([("Revenue", f"${k['revenue']:,.0f}", delta_html(pcg.loc['revenue','change_pct'])),
+               ("Profit", f"${k['profit']:,.0f}", delta_html(pcg.loc['profit','change_pct'])),
+               ("Margin", f"{k['margin']:.1%}", "profit / revenue"),
+               ("Orders", f"{k['orders']:,}", delta_html(pcg.loc['orders','change_pct'])),
+               ("Customers", f"{k['customers']:,}", f"{k['units']:,} units sold")])
+    gt1, gt2, gt3 = st.tabs(["📊 Category & region", "📈 Trend explorer", "🔍 Drill-down data"])
+    with gt1:
+        a, b = st.columns(2)
+        a.plotly_chart(C(px.bar(f.groupby("category").agg(revenue=("revenue","sum"),profit=("profit","sum")).reset_index(), x="category", y=["revenue","profit"], barmode="group", title="Revenue vs profit by category")), use_container_width=True)
+        b.plotly_chart(C(px.bar(f.groupby("region").agg(revenue=("revenue","sum"),margin=("profit", lambda s: 0)).reset_index().assign(margin=f.groupby("region").apply(lambda g: g.profit.sum()/g.revenue.sum()).values), x="region", y="revenue", color="margin", color_continuous_scale="RdYlGn", title="Revenue by region (colour = margin)")), use_container_width=True)
+        st.dataframe(f.groupby(["category"]).agg(revenue=("revenue","sum"), profit=("profit","sum"), orders=("order_id","nunique"), units=("qty","sum")).assign(margin=lambda d: d.profit/d.revenue).sort_values("revenue", ascending=False), use_container_width=True)
+    with gt2:
+        metric = st.radio("Metric", ["revenue","profit","qty"], horizontal=True, format_func=lambda m: {"revenue":"Revenue","profit":"Profit","qty":"Units"}[m])
+        trend = f.groupby(["order_date","category"])[metric].sum().reset_index()
+        st.plotly_chart(C(px.area(trend, x="order_date", y=metric, color="category", title=f"{metric.capitalize()} over time by category")), use_container_width=True)
+        st.plotly_chart(C(px.line(f.groupby("order_date")[metric].sum().reset_index(), x="order_date", y=metric, title=f"Total {metric} — all categories")), use_container_width=True)
+    with gt3:
+        st.caption(f"Showing first 500 of {len(f):,} filtered records. Download exports the full filtered set.")
+        st.dataframe(f.head(500), use_container_width=True, height=420)
+        st.download_button("⬇ Download full filtered dataset (CSV)", f.to_csv(index=False), "cortexora_filtered.csv")
 elif page == "Demand Forecasting":
-    st.title("Demand Forecasting & Inventory")
-    cat = st.selectbox("Category", sorted(products.category.unique())); s = weekly_series(df, cat, products)
-    ev = evaluate(s); st.write(f"Chronological split — train ends {ev['train_end']}. Test totals: {ev['test_actual_total']:.0f} units")
-    st.dataframe(pd.DataFrame({m: ev[m] for m in ["moving_average_4w","seasonal_naive"]}).T)
-    fc = forecast_next(s); hist = s.reset_index(); hist.columns = ["week","forecast"]
-    st.plotly_chart(px.line(pd.concat([hist.tail(26), fc]), x="week", y="forecast", title=f"{cat} weekly demand: history + forecast (80% interval in table)"), use_container_width=True)
-    st.dataframe(fc, use_container_width=True)
-    st.subheader("Inventory reorder plan (forecast-based, 95% service-level assumption)")
-    stats = daily_demand_stats(df)
-    stock = inv.merge(products[["product_id","category","unit_cost","list_price"]], on="product_id").merge(stats, on="product_id", how="left").fillna(0)
-    plan = reorder_plan(stock)
-    st.dataframe(plan[["product_id","category","stock_on_hand","forecast_daily","lead_time_days","safety_stock","recommended_reorder_qty","estimated_order_cost","stockout_risk"]], use_container_width=True)
-    st.download_button("Download reorder plan CSV", plan.to_csv(index=False), "reorder_plan.csv")
-
+    page_intro()
+    top = st.columns([2,1,1])
+    cat = top[0].selectbox("Category", sorted(products.category.unique()))
+    horizon = top[1].slider("Forecast horizon (weeks)", 4, 16, 8); review = top[2].slider("Inventory review period (days)", 7, 60, 30)
+    s = weekly_series(df, cat, products); ev = evaluate(s); fc = forecast_next(s, horizon)
+    mae_delta = ev["seasonal_naive"]["WAPE"] - ev["moving_average_4w"]["WAPE"]
+    kpi_cards([("Model WAPE (hold-out)", f"{ev['moving_average_4w']['WAPE']:.1%}", "moving-average 4w, chronological test"),
+               ("Seasonal-naive WAPE", f"{ev['seasonal_naive']['WAPE']:.1%}", f"model is {'better' if mae_delta>0 else 'NOT better'} by {abs(mae_delta):.1%}"),
+               ("Test volume", f"{ev['test_actual_total']:,.0f} units", f"train ended {ev['train_end']}"),
+               ("Next-4-weeks outlook", f"{fc.forecast.head(4).sum():,.0f} units", f"{cat} · 80% interval shown")])
+    ft1, ft2, ft3 = st.tabs(["🔮 Forecast", "🎯 Accuracy vs baseline", "📦 Inventory reorder plan"])
+    with ft1:
+        import plotly.graph_objects as go
+        hist = s.reset_index(); hist.columns = ["week","actual"]
+        fig = go.Figure()
+        fig.add_scatter(x=fc.week, y=fc.upper, line=dict(width=0), showlegend=False)
+        fig.add_scatter(x=fc.week, y=fc.lower, fill="tonexty", fillcolor="rgba(56,189,248,.18)", line=dict(width=0), name="80% interval")
+        fig.add_scatter(x=hist.week.tail(40), y=hist.actual.tail(40), mode="lines", name="Actual demand", line=dict(color="#e8eef6", width=2))
+        fig.add_scatter(x=fc.week, y=fc.forecast, mode="lines+markers", name="Forecast", line=dict(color="#38bdf8", width=3))
+        st.plotly_chart(C(fig, 400).update_layout(title=f"{cat} — weekly demand: history, forecast & 80% interval"), use_container_width=True)
+        st.dataframe(fc.assign(week=fc.week.dt.date), use_container_width=True)
+        st.caption("Estimates, not actuals. Interval assumes roughly normal weekly variation around the 4-week moving average.")
+    with ft2:
+        evd = pd.DataFrame({m: ev[m] for m in ["moving_average_4w","seasonal_naive"]}).T.rename(index={"moving_average_4w":"CORTEXORA moving-average (4w)","seasonal_naive":"Seasonal-naive baseline"})
+        st.dataframe(evd.style.highlight_min(axis=0, color="#14401f"), use_container_width=True)
+        st.info("Read this before trusting the forecast: errors are measured on a chronological hold-out the model never saw. If the model did not beat the baseline, the chart above should not drive purchasing.")
+    with ft3:
+        st.caption(f"Forecast-based plan · 95% service level (z=1.65) · review period {review} days · costs at unit cost")
+        stats = daily_demand_stats(df)
+        stock = inv.merge(products[["product_id","category","unit_cost","list_price"]], on="product_id").merge(stats, on="product_id", how="left").fillna(0)
+        plan = reorder_plan(stock, review_days=review)
+        risk_counts = plan.stockout_risk.value_counts().to_dict()
+        kpi_cards([("Products at high stockout risk", f"{risk_counts.get('High',0)}", "act this cycle"), ("Units to reorder", f"{plan.recommended_reorder_qty.sum():,}", "across all products"), ("Estimated order cost", f"${plan.estimated_order_cost.sum():,.0f}", "at current unit cost")], st.columns(3))
+        st.dataframe(plan[["product_id","category","stock_on_hand","forecast_daily","lead_time_days","safety_stock","recommended_reorder_qty","estimated_order_cost","stockout_risk"]], use_container_width=True, height=420)
+        st.download_button("⬇ Download reorder plan (CSV)", plan.to_csv(index=False), "reorder_plan.csv")
 elif page == "Pricing & Profit Optimization":
-    st.title("Pricing & Profit — assumption-based simulator")
-    st.info("Elasticity below is YOUR assumption, not an estimated causal effect. Results are scenarios, not predictions.")
-    p = st.selectbox("Product", products.product_name); row = products[products.product_name==p].iloc[0]
-    chg = st.slider("Price change %", -30, 30, 10); elas = st.slider("Assumed elasticity", -3.0, -0.1, -1.2)
-    sold = items[items.product_id==row.product_id]; base_q, base_rev = sold.qty.sum(), (sold.qty*sold.unit_price*(1-sold.discount)).sum()
-    new_q = base_q*(1+elas*chg/100); new_rev = new_q*row.list_price*(1+chg/100)
-    st.metric("Scenario revenue", f"${new_rev:,.0f}", f"{new_rev/base_rev-1:+.1%} vs observed ${base_rev:,.0f} (observed 24-mo total)")
-    st.subheader("Discount effectiveness (observed association — NOT a causal effect)")
-    st.dataframe(discount_effectiveness(f), use_container_width=True)
-    st.subheader("Break-even analysis")
-    fixed = st.number_input("Monthly fixed cost to cover ($)", value=10000.0, step=1000.0)
-    be = breakeven_units(fixed, row.list_price, row.unit_cost)
-    st.write(f"{p}: contribution/unit = ${row.list_price-row.unit_cost:,.2f} → break-even = {'never (contribution ≤ 0)' if be==float('inf') else f'{be:,.0f} units'}")
-
+    page_intro()
+    st.info("Elasticity here is **your assumption**, not an estimated causal effect. Outputs are scenarios for discussion — not predictions, and not pricing advice proven by this data.")
+    left, right = st.columns([1, 1.4])
+    with left:
+        with st.container(border=True):
+            st.markdown("#### 🎛️ Scenario controls")
+            pname = st.selectbox("Product", products.product_name); prow = products[products.product_name==pname].iloc[0]
+            chg = st.slider("Price change %", -30, 30, 10); elas = st.slider("Assumed price elasticity", -3.0, -0.1, -1.2, step=0.1)
+            fixed = st.number_input("Monthly fixed cost to cover ($)", value=10000.0, step=1000.0)
+    sold = items[items.product_id==prow.product_id]; base_q = sold.qty.sum(); base_rev = (sold.qty*sold.unit_price*(1-sold.discount)).sum()
+    new_q = base_q*(1+elas*chg/100); new_price = prow.list_price*(1+chg/100); new_rev = new_q*new_price
+    new_profit = new_q*(new_price-prow.unit_cost); base_profit = base_rev - sold.qty.mul(sold.unit_cost).sum()
+    be = breakeven_units(fixed, prow.list_price, prow.unit_cost)
+    with right:
+        kpi_cards([("Scenario revenue", f"${new_rev:,.0f}", f"{new_rev/base_rev-1:+.1%} vs observed"), ("Scenario profit", f"${new_profit:,.0f}", f"{new_profit/base_profit-1:+.1%} vs observed"), ("Scenario volume", f"{new_q:,.0f} units", f"from {base_q:,} at elasticity {elas}")], st.columns(3))
+        sweep = pd.DataFrame([dict(price_change=c, revenue=base_q*(1+elas*c/100)*prow.list_price*(1+c/100)) for c in range(-30, 31, 2)])
+        fig = px.line(sweep, x="price_change", y="revenue", title=f"Revenue across price changes (elasticity {elas}) — marker = your scenario")
+        fig.add_scatter(x=[chg], y=[new_rev], mode="markers", marker=dict(size=14, color="#fbbf24"), name="Your scenario")
+        st.plotly_chart(C(fig), use_container_width=True)
+    pt1, pt2 = st.tabs(["🏷️ Discount effectiveness (observed)", "⚖️ Break-even"])
+    with pt1:
+        st.caption("Observed association only: discounted baskets differ in many ways. This does **not** estimate what a discount *causes* — use the Experiments Lab for that.")
+        disc = discount_effectiveness(f); st.dataframe(disc, use_container_width=True)
+        st.plotly_chart(C(px.bar(disc, x="discount_bucket", y="revenue", color="margin", color_continuous_scale="RdYlGn", title="Revenue by discount depth (colour = margin)")), use_container_width=True)
+    with pt2:
+        st.write(f"**{pname}** · list price ${prow.list_price:,.2f} · unit cost ${prow.unit_cost:,.2f} · contribution **${prow.list_price-prow.unit_cost:,.2f}/unit**")
+        st.metric("Break-even volume for the fixed cost above", "Never — contribution ≤ $0" if be == float("inf") else f"{be:,.0f} units")
 elif page == "Customer Intelligence":
-    st.title("Customer Intelligence (RFM + Churn Model)")
-    r = rfm(orders, items); st.plotly_chart(px.histogram(r, x="segment", color="segment"), use_container_width=True)
-    st.dataframe(r.sort_values("monetary", ascending=False).head(100), use_container_width=True)
-    st.subheader("Churn prediction — validated model (Phase 4)")
-    st.caption("Label: no purchase in the 90 days after cutoff (proxy — retail has no cancellation event). "
-               "Trained on synthetic demo data: metrics validate the pipeline, not real-world performance. See docs/06_MODEL_CARD_CHURN.md.")
+    page_intro(); r = rfm(orders, items)
     from cortexora.models.churn import build_dataset, train_and_evaluate, predict_risk
     @st.cache_resource
     def _train():
@@ -240,35 +332,54 @@ elif page == "Customer Intelligence":
         data = build_dataset(orders, items, cutoff)
         return train_and_evaluate(data), data
     try:
-        result, data = _train(); rep = result["report"]
-        st.write(f"Best model: **{rep['best_model']}** · {rep['n_customers']} customers · observed churn rate {rep['churn_rate']:.1%} · hold-out n={rep['test_size']}")
-        st.dataframe(pd.DataFrame(rep["results"]).T, use_container_width=True)
-        st.bar_chart(pd.Series(rep["feature_importance"], name="importance (model explanation, not causal)"))
-        risk = predict_risk(result["model"], data)
-        st.subheader("Highest-risk customers"); st.dataframe(risk.head(50), use_container_width=True)
-        st.download_button("Download risk list CSV", risk.to_csv(index=False), "churn_risk.csv")
-    except ValueError as e:
-        st.error(str(e))
-
+        result, data = _train(); rep = result["report"]; risk = predict_risk(result["model"], data)
+        churned = int((data.churn == 1).sum()); high_risk = int((risk.risk_band.astype(str) == "High").sum())
+        ct1, ct2, ct3 = st.tabs(["🧩 Segments (RFM)", "🤖 Churn model", "🚨 Retention worklist"])
+        with ct1:
+            kpi_cards([("Customers", f"{len(r):,}", "in warehouse"), ("Active", f"{int((r.segment.astype(str)=='Active').sum()):,}", "ordered in last 90d"), ("At risk", f"{int((r.segment.astype(str)=='At risk').sum()):,}", "91–180d since last order"), ("Churned (heuristic)", f"{int((r.segment.astype(str).str.startswith('Churned')).sum()):,}", ">180d — heuristic, not the model")])
+            a, b = st.columns(2)
+            a.plotly_chart(C(px.histogram(r, x="segment", color="segment", title="Customers by RFM segment")), use_container_width=True)
+            b.plotly_chart(C(px.scatter(r, x="recency_days", y="monetary", size="frequency", color="segment", title="Recency vs value (bubble = frequency)")), use_container_width=True)
+            st.dataframe(r.sort_values("monetary", ascending=False).head(100), use_container_width=True, height=360)
+        with ct2:
+            st.caption("Label: **no purchase in the 90 days after cutoff** (a proxy — retail has no cancellation event). Trained on synthetic demo data: these metrics validate the pipeline, not real-world accuracy. Full detail: docs/06_MODEL_CARD_CHURN.md.")
+            best = rep["results"][rep["best_model"]]; base_ = rep["results"]["baseline_majority"]
+            kpi_cards([("Best model", rep["best_model"].replace("_"," "), f"of {rep['n_customers']} customers"), ("ROC-AUC", f"{best['roc_auc']:.2f}", f"baseline {base_['roc_auc']:.2f}"), ("PR-AUC", f"{best['pr_auc']:.2f}", f"baseline {base_['pr_auc']:.2f}"), ("Observed churn rate", f"{rep['churn_rate']:.1%}", f"hold-out n={rep['test_size']}")])
+            a, b = st.columns(2)
+            a.dataframe(pd.DataFrame(rep["results"]).T, use_container_width=True)
+            b.plotly_chart(C(px.bar(pd.Series(rep["feature_importance"]).reset_index(), x="index", y=0, title="What the model leans on (explanation, not causation)")).update_xaxes(title="feature").update_yaxes(title="importance"), use_container_width=True)
+        with ct3:
+            kpi_cards([("High-risk customers", f"{high_risk}", "predicted probability > 66%"), ("Already churned (label)", f"{churned}", "no order in the 90d window"), ("Worklist size", f"{min(50, len(risk))}", "exportable below")], st.columns(3))
+            st.dataframe(risk.head(50), use_container_width=True, height=420)
+            st.download_button("⬇ Download full risk list (CSV)", risk.to_csv(index=False), "churn_risk.csv")
+            st.caption("Act human-first: review before contacting anyone. A prediction is a prioritisation aid, not a verdict on a customer.")
+    except ValueError as e: st.error(str(e))
 elif page == "Marketing Performance":
-    st.title("Marketing Performance"); st.caption("CAC is a spend/conversions proxy. ROAS is not shown: no attribution join exists in this data — attributed ≠ incremental.")
-    st.dataframe(marketing_metrics(mkt), use_container_width=True)
-    st.plotly_chart(px.bar(mkt.groupby("channel").spend.sum().reset_index(), x="channel", y="spend"), use_container_width=True)
-    st.subheader("Budget allocation optimizer (fitted response curves, scenarios — not causal incrementality)")
-    budget = st.slider("Total weekly budget ($)", 500, 10000, 3300)
-    opt = optimize_budget(mkt, total_budget=float(budget))
-    st.dataframe(opt["curves"], use_container_width=True); st.caption(opt.get("note",""))
-    if "expected_gain_pct" in opt:
-        st.metric("Expected conversions change vs current shares (same budget)", f"{opt['expected_gain_pct']:+.1f}%")
-        comp = pd.DataFrame({"channel": list(opt["allocation"]), "current": [opt["current_allocation"][c] for c in opt["allocation"]], "optimized": list(opt["allocation"].values())})
-        st.plotly_chart(px.bar(comp, x="channel", y=["current","optimized"], barmode="group"), use_container_width=True)
-    st.subheader("Marketing Mix Modelling — readiness gate")
-    gate = mmm_readiness(mkt, has_revenue_outcome=False); st.dataframe(gate, use_container_width=True)
-    if gate.Met.all(): st.success("All checks pass — MMM fitting is enabled.")
-    else: st.warning("MMM is NOT fitted: the checks above fail. An unidentifiable model shown confidently is worse than no model. Needed: a revenue outcome joinable to weekly channel spend, plus external controls (price/promo/seasonality). The budget optimizer above is a simpler, honestly-labelled alternative on this data.")
-
+    page_intro(); st.caption("CAC is a spend/conversions proxy. ROAS is not shown: no attribution join exists in this data — attributed ≠ incremental.")
+    mm = marketing_metrics(mkt)
+    kpi_cards([("Total spend", f"${mm.spend.sum():,.0f}", f"{mkt.spend_date.nunique()} weekly flights"), ("Conversions", f"{mm.conversions.sum():,}", "all channels"), ("Blended CAC (proxy)", f"${mm.spend.sum()/max(mm.conversions.sum(),1):,.2f}", "spend / conversion"), ("Best CAC channel", str(mm.loc[mm.cac_proxy.idxmin(),'channel']), f"${mm.cac_proxy.min():,.2f} per conversion")])
+    mt1, mt2, mt3 = st.tabs(["📊 Channels", "🎯 Budget optimizer", "🧪 MMM readiness gate"])
+    with mt1:
+        a, b = st.columns(2)
+        a.plotly_chart(C(px.bar(mm, x="channel", y="spend", color="cac_proxy", color_continuous_scale="RdYlGn_r", title="Spend by channel (colour = CAC, lower is greener)")), use_container_width=True)
+        b.plotly_chart(C(px.bar(mm, x="channel", y="conversion_rate", title="Conversion rate by channel")), use_container_width=True)
+        st.dataframe(mm, use_container_width=True)
+    with mt2:
+        st.caption("Fitted diminishing-returns response curves (conversions = a·spend^b). Scenarios from an associational fit — **not** causal incrementality.")
+        budget = st.slider("Total weekly budget ($)", 500, 10000, 3300)
+        opt = optimize_budget(mkt, total_budget=float(budget)); st.caption(opt.get("note",""))
+        if "expected_gain_pct" in opt:
+            kpi_cards([("Expected conversion change", f"{opt['expected_gain_pct']:+.1f}%", "same total budget, reallocated"), ("Reliable channels", f"{int(opt['curves'].reliable.sum())} / {len(opt['curves'])}", "R² and elasticity gates passed")], st.columns(2))
+            comp = pd.DataFrame({"channel": list(opt["allocation"]), "current": [opt["current_allocation"][c] for c in opt["allocation"]], "optimized": list(opt["allocation"].values())})
+            a, b = st.columns([1.3, 1])
+            a.plotly_chart(C(px.bar(comp, x="channel", y=["current","optimized"], barmode="group", title="Current vs optimized weekly allocation")), use_container_width=True)
+            b.dataframe(opt["curves"], use_container_width=True)
+    with mt3:
+        gate = mmm_readiness(mkt, has_revenue_outcome=False); st.dataframe(gate, use_container_width=True)
+        if gate.Met.all(): st.success("All checks pass — MMM fitting is enabled.")
+        else: st.warning("**MMM is NOT fitted** — the checks above fail. An unidentifiable model shown confidently is worse than no model. Needed: a revenue outcome joinable to weekly channel spend, plus external controls (price/promo/seasonality). The budget optimizer is the honest alternative on this data.")
 elif page == "Experiments & Causal Lab":
-    st.title("Causal Inference & Experimentation Lab")
+    page_intro()
     st.caption("Causal claims require a causal design. Randomised A/B test → effect + uncertainty. No randomisation → no causal claim from this page.")
     st.subheader("A/B test analyser (conversion)")
     c1, c2 = st.columns(2)
@@ -295,7 +406,7 @@ elif page == "Experiments & Causal Lab":
     st.write(f"DiD estimate: **{d['did_effect']:+.2f}** (95% CI [{d['ci_low']:.2f}, {d['ci_high']:.2f}], p={d['p_value']:.4f}) · pre-period level gap = {d['pre_period_gap']:.2f} (a large gap warns parallel trends may fail)")
 
 elif page == "Competitor Intelligence":
-    st.title("Competitor & Market Intelligence Radar")
+    page_intro()
     st.warning("No live competitor feed is connected. This page analyses snapshots YOU supply (compliantly collected public prices with source + timestamp) — it does not scrape or simulate a live feed.")
     template = pd.DataFrame(dict(product_id=[1,2], competitor=["RivalCo","RivalCo"], competitor_price=[99.0,49.0],
                                  observed_at=["2026-10-01","2026-10-01"], source_url=["https://example.com/p1","https://example.com/p2"]))
@@ -320,7 +431,7 @@ elif page == "Competitor Intelligence":
         except ValueError as e: st.error(f"Invalid snapshot: {e}")
 
 elif page == "Decision Intelligence Engine":
-    st.title("Decision Intelligence Engine")
+    page_intro()
     st.caption("Priority = √expected_impact × confidence × urgency. Human approval required — no autonomous actions. "
                "Workflow: pending → approved/rejected/deferred → (after the measurement period) measured, with expected-vs-actual compared below.")
     stats = daily_demand_stats(df)
@@ -331,31 +442,35 @@ elif page == "Decision Intelligence Engine":
     if st.button("Generate recommendations from current data"): persist(recs, DB_PATH); st.success(f"{len(recs)} generated (duplicates ignored)")
     dec = load_decisions(DB_PATH)
     counts = dec.status.value_counts().to_dict() if len(dec) else {}
-    st.write("**Decision pipeline:** " + (" · ".join(f"{k}: {v}" for k, v in counts.items()) if counts else "no decisions yet"))
-    owner = st.text_input("Decision owner (recorded on approve/record)", value="")
+    kpi_cards([("⏳ Pending", f"{counts.get('pending',0)}", "awaiting your review"), ("✅ Approved", f"{counts.get('approved',0)}", "in flight"), ("⏸️ Deferred", f"{counts.get('deferred',0)}", "revisit later"), ("📏 Measured", f"{counts.get('measured',0)}", "outcome recorded"), ("🚫 Rejected", f"{counts.get('rejected',0)}", "closed")])
+    owner = st.text_input("Decision owner (recorded on approve/record)", value="", placeholder="e.g. Logesh — accountability is part of the audit trail")
+    STATUS_STYLE = {"pending": ("⏳","#fbbf24"), "approved": ("✅","#34d399"), "rejected": ("🚫","#fb7185"), "deferred": ("⏸️","#a5b4fc"), "measured": ("📏","#38bdf8")}
     for r in dec.itertuples():
-        due = ""
-        if pd.notna(r.decided_at) and pd.notna(r.measurement_period_days):
-            due = f" · outcome due {(pd.Timestamp(r.decided_at) + pd.Timedelta(days=int(r.measurement_period_days))).date()}"
-        st.write(f"**{r.recommendation_id} · {r.area}** — {r.problem} → {r.action}  \nEvidence: {r.evidence} · Expected impact ${r.expected_impact:,.0f} · Priority {r.priority} · Status **{r.status}**{due}")
-        if r.area == "Pricing" and r.status == "pending":
-            st.caption("↳ Before acting, design this as a test in **Experiments & Causal Lab** (sidebar) so the outcome is causal, not anecdotal.")
-        b = st.columns(3)
-        if b[0].button("Approve", key=r.recommendation_id+"a"): set_status(r.recommendation_id,"approved",DB_PATH,owner); st.rerun()
-        if b[1].button("Reject", key=r.recommendation_id+"r"): set_status(r.recommendation_id,"rejected",DB_PATH,owner); st.rerun()
-        if b[2].button("Defer", key=r.recommendation_id+"d"): set_status(r.recommendation_id,"deferred",DB_PATH,owner); st.rerun()
-        if r.status == "approved":
-            with st.expander(f"Record actual outcome — {r.recommendation_id}"):
-                actual = st.number_input("Actual outcome (same units as expected impact, $)", key=r.recommendation_id+"act", value=float(r.expected_impact))
-                note = st.text_input("How was it measured? (source, period, caveats)", key=r.recommendation_id+"note")
-                if st.button("Record outcome", key=r.recommendation_id+"rec"):
-                    if not note: st.error("A measurement note is required — an outcome without a source is not evidence.")
-                    else:
-                        try: record_outcome(r.recommendation_id, actual, note, DB_PATH, owner); st.rerun()
-                        except ValueError as e: st.error(str(e))
-        if r.status == "measured":
-            var = (r.actual_outcome - r.expected_impact) / abs(r.expected_impact) * 100 if r.expected_impact else 0
-            st.caption(f"Measured: actual ${r.actual_outcome:,.0f} vs expected ${r.expected_impact:,.0f} ({var:+.1f}%) — {r.outcome_note}")
+        icon_, colour = STATUS_STYLE.get(r.status, ("•","#9db4d4"))
+        with st.container(border=True):
+            due = ""
+            if pd.notna(r.decided_at) and pd.notna(r.measurement_period_days):
+                due = f" · outcome due {(pd.Timestamp(r.decided_at) + pd.Timedelta(days=int(r.measurement_period_days))).date()}"
+            st.markdown(f"<div class='cx-rec'><b style='color:#fff'>{icon_} {r.recommendation_id} · {r.area}</b> — {r.problem} → <b style='color:#7dd3fc'>{r.action}</b><br><span class='meta'>Evidence: {r.evidence} · Expected impact ${r.expected_impact:,.0f} · Priority {r.priority} · Status <b style='color:{colour}'>{r.status}</b>{due}</span></div>", unsafe_allow_html=True)
+            if r.area == "Pricing" and r.status == "pending":
+                st.caption("↳ Before acting, design this as a test in **Experiments & Causal Lab** so the outcome is causal, not anecdotal.")
+            if r.status in ("pending","deferred"):
+                b = st.columns(3)
+                if b[0].button("✅ Approve", key=r.recommendation_id+"a"): set_status(r.recommendation_id,"approved",DB_PATH,owner); st.rerun()
+                if b[1].button("🚫 Reject", key=r.recommendation_id+"r"): set_status(r.recommendation_id,"rejected",DB_PATH,owner); st.rerun()
+                if b[2].button("⏸️ Defer", key=r.recommendation_id+"d"): set_status(r.recommendation_id,"deferred",DB_PATH,owner); st.rerun()
+            if r.status == "approved":
+                with st.expander(f"📏 Record actual outcome — {r.recommendation_id}"):
+                    actual = st.number_input("Actual outcome (same units as expected impact, $)", key=r.recommendation_id+"act", value=float(r.expected_impact))
+                    note = st.text_input("How was it measured? (source, period, caveats)", key=r.recommendation_id+"note")
+                    if st.button("Record outcome", key=r.recommendation_id+"rec"):
+                        if not note: st.error("A measurement note is required — an outcome without a source is not evidence.")
+                        else:
+                            try: record_outcome(r.recommendation_id, actual, note, DB_PATH, owner); st.rerun()
+                            except ValueError as e: st.error(str(e))
+            if r.status == "measured":
+                var = (r.actual_outcome - r.expected_impact) / abs(r.expected_impact) * 100 if r.expected_impact else 0
+                st.caption(f"📏 Measured: actual ${r.actual_outcome:,.0f} vs expected ${r.expected_impact:,.0f} ({var:+.1f}%) — {r.outcome_note}")
     st.subheader("Outcome tracking — did our decisions work?")
     s = outcome_summary(dec)
     if s["measured"] == 0:
@@ -363,7 +478,7 @@ elif page == "Decision Intelligence Engine":
     else:
         m = st.columns(3); m[0].metric("Measured decisions", s["measured"]); m[1].metric("Median |variance| vs expected", f"{s['median_abs_variance_pct']:.1f}%"); m[2].metric("Within ±20% of expected", f"{s['within_20pct']:.0%}")
         det = s["detail"]
-        st.plotly_chart(px.bar(det, x="recommendation_id", y="variance_pct", color="area", title="Outcome variance vs expectation (%) — calibration of the engine's estimates"), use_container_width=True)
+        st.plotly_chart(C(px.bar(det, x="recommendation_id", y="variance_pct", color="area", title="Outcome variance vs expectation (%) — calibration of the engine estimates")), use_container_width=True)
         st.dataframe(s["by_area"], use_container_width=True)
         st.dataframe(det[["recommendation_id","area","expected_impact","actual_outcome","variance_pct","owner","outcome_note"]], use_container_width=True)
         st.caption("Persistent large positive/negative bias by area means that detector's impact estimates are mis-calibrated — adjust its confidence/assumptions, don't just celebrate or panic over one result.")
@@ -372,7 +487,7 @@ elif page == "Decision Intelligence Engine":
     st.download_button("Download decision history CSV", dec.to_csv(index=False), "cortexora_decision_history.csv")
 
 elif page == "Reports":
-    st.title("Reports")
+    page_intro()
     st.caption("The report renders computed values from the same functions as the dashboards — no hand-typed figures. Scope follows the sidebar filters.")
     import json as _json, pathlib as _pl
     cat_sel = st.selectbox("Forecast category in report", sorted(products.category.unique()))
@@ -385,7 +500,7 @@ elif page == "Reports":
     st.download_button("Download decisions CSV", load_decisions(DB_PATH).to_csv(index=False), "cortexora_decisions.csv")
 
 elif page == "Settings & About":
-    st.title("Settings & About")
+    page_intro()
     st.markdown("## 🧠 CORTEXORA\n**The Intelligence Engine for Predictive Business Decisions**  \n*Predict the Future. Optimize the Present. Engineer Business Growth.*")
     from cortexora import __version__
     from cortexora.config import ROOT
@@ -409,46 +524,55 @@ elif page == "Settings & About":
                 "- No live competitor feed is simulated — Competitor Intelligence uses your validated snapshots only.")
 
 elif page == "Data Quality & Monitoring":
-    st.title("Data Quality & Model Monitoring")
-    st.caption("Three different things, never conflated: data drift ≠ prediction drift ≠ measured performance degradation. Only the last — computed on later *labelled* data — is evidence about accuracy.")
+    page_intro()
+    st.caption("Three different things, never conflated: **data drift ≠ prediction drift ≠ measured performance degradation**. Only the last — computed on later *labelled* data — is evidence about accuracy.")
     from cortexora.monitoring.quality import run_all
     from cortexora.monitoring.drift import drift_report, performance_comparison
-    st.subheader("Pipeline runs (logged by the ETL)")
-    try:
-        runs = load_table("pipeline_runs").sort_values("run_id", ascending=False)
-        st.dataframe(runs.head(10), use_container_width=True)
-        last_ok = runs[runs.status=="success"].finished_at.max()
-        st.write(f"Last successful run: **{last_ok}** · Data current to **{orders.order_date.max()}** (end of the synthetic dataset — 'freshness' here means pipeline recency, not real-world recency).")
-    except Exception: st.info("No pipeline runs logged yet — run `python scripts/run_etl.py`.")
-    st.subheader("Data quality checks")
-    frames = {t: load_table(t) for t in ["orders","order_items","customers","products"]}
-    q = run_all(frames); st.dataframe(q, use_container_width=True)
-    if (q.status=="FAIL").any(): st.error("FAIL checks present — analytical outputs should not be trusted until resolved.")
-    st.subheader("Data drift — first 18 months (reference) vs last 6 months (current)")
-    mid, end = df.order_date.min() + pd.Timedelta(days=540), df.order_date.max()
-    ref, cur = df[df.order_date <= mid], df[df.order_date > end - pd.Timedelta(days=180)]
-    st.dataframe(drift_report(ref, cur, ["qty","unit_price","discount","revenue"]), use_container_width=True)
-    st.caption("PSI <0.10 stable · 0.10–0.25 moderate shift · >0.25 significant shift. A shift is a prompt to investigate, not proof the model broke.")
-    st.subheader("Churn model — temporal performance monitoring")
-    st.caption("Train on an earlier cohort, score a later labelled cohort. This is the only honest way to detect degradation before it hurts.")
-    from cortexora.models.churn import build_dataset, train_and_evaluate, evaluate_on, FEATURES as CHURN_FEATURES
-    @st.cache_resource
-    def _monitor():
-        maxd = pd.to_datetime(orders.order_date).max()
-        ref_data = build_dataset(orders, items, maxd - pd.Timedelta(days=270))
-        cur_data = build_dataset(orders, items, maxd - pd.Timedelta(days=90))
-        trained = train_and_evaluate(ref_data); model = trained["model"]
-        return trained["report"], evaluate_on(model, cur_data), cur_data
-    try:
-        ref_rep, cur_metrics, cur_data = _monitor()
-        ref_metrics = ref_rep["results"][ref_rep["best_model"]]
-        comp = performance_comparison(ref_metrics, cur_metrics)
-        c = st.columns(3); c[0].metric("Reference PR-AUC (hold-out)", f"{comp['reference']:.3f}"); c[1].metric("Later-period PR-AUC", f"{comp['current']:.3f}", f"{comp['delta']:+.3f}"); c[2].metric("Degraded?", "YES — investigate" if comp["degraded"] else "No")
-        st.write(comp["note"])
-        st.write(f"Later cohort: {len(cur_data)} customers · observed churn {cur_metrics['observed_churn_rate']:.1%} vs mean predicted {cur_metrics['mean_predicted_probability']:.1%} (calibration gap is itself a monitoring signal).")
-        st.dataframe(pd.DataFrame({"reference_holdout": ref_metrics, "later_period": {k: cur_metrics[k] for k in ref_metrics}}), use_container_width=True)
-        import json, pathlib
-        art = pathlib.Path("cortexora/models/artifacts/churn_evaluation.json")
-        if art.exists():
-            meta = json.loads(art.read_text()); st.caption(f"Registered artifact: {meta.get('model_version','?')} · trained {meta.get('trained_at','?')} · data cutoff {meta.get('data_cutoff','?')} · {meta.get('training_data','')}")
-    except ValueError as e: st.error(str(e))
+    mon1, mon2, mon3 = st.tabs(["🏗️ Pipeline & data quality", "🌊 Drift", "🤖 Model performance"])
+    with mon1:
+        try:
+            runs = load_table("pipeline_runs").sort_values("run_id", ascending=False)
+            ok = int((runs.status == "success").sum()); bad = int((runs.status != "success").sum())
+            last_ok = runs[runs.status=="success"].finished_at.max()
+            kpi_cards([("Pipeline runs", f"{len(runs)}", f"{ok} succeeded · {bad} failed/blocked"), ("Last successful run", str(last_ok)[:16], "warehouse load"), ("Data current to", str(orders.order_date.max()), "end of synthetic dataset")], st.columns(3))
+            st.dataframe(runs.head(10), use_container_width=True)
+        except Exception: st.info("No pipeline runs logged yet — run `python scripts/run_etl.py`.")
+        frames = {tb: load_table(tb) for tb in ["orders","order_items","customers","products"]}
+        q = run_all(frames)
+        fails = int((q.status=="FAIL").sum()); warns = int((q.status=="WARN").sum())
+        if fails: st.error(f"{fails} FAIL check(s) — analytical outputs should not be trusted until resolved.")
+        elif warns: st.warning(f"All hard checks pass; {warns} warning(s) to review.")
+        else: st.success("All data-quality checks pass.")
+        st.dataframe(q, use_container_width=True)
+    with mon2:
+        mid, end = df.order_date.min() + pd.Timedelta(days=540), df.order_date.max()
+        ref, cur = df[df.order_date <= mid], df[df.order_date > end - pd.Timedelta(days=180)]
+        dr = drift_report(ref, cur, ["qty","unit_price","discount","revenue"])
+        worst = dr.iloc[0] if len(dr) else None
+        kpi_cards([("Features tracked", f"{len(dr)}", "first 18m vs last 6m"), ("Highest PSI", f"{worst.psi:.3f}" if worst is not None else "—", f"{worst.feature}: {worst.status}" if worst is not None else "")], st.columns(2))
+        st.dataframe(dr, use_container_width=True)
+        st.plotly_chart(C(px.bar(dr, x="feature", y="psi", color="status", title="PSI by feature (0.10 = watch · 0.25 = investigate)")), use_container_width=True)
+        st.caption("A shift is a prompt to investigate, not proof the model broke. Drift alone never proves degradation.")
+    with mon3:
+        st.caption("Train on an earlier cohort, score a later labelled cohort — the only honest way to detect degradation before it hurts.")
+        from cortexora.models.churn import build_dataset, train_and_evaluate, evaluate_on, FEATURES as CHURN_FEATURES
+        @st.cache_resource
+        def _monitor():
+            maxd = pd.to_datetime(orders.order_date).max()
+            ref_data = build_dataset(orders, items, maxd - pd.Timedelta(days=270))
+            cur_data = build_dataset(orders, items, maxd - pd.Timedelta(days=90))
+            trained = train_and_evaluate(ref_data); model = trained["model"]
+            return trained["report"], evaluate_on(model, cur_data), cur_data
+        try:
+            ref_rep, cur_metrics, cur_data = _monitor()
+            ref_metrics = ref_rep["results"][ref_rep["best_model"]]
+            comp = performance_comparison(ref_metrics, cur_metrics)
+            kpi_cards([("Reference PR-AUC", f"{comp['reference']:.3f}", "hold-out, earlier cohort"), ("Later-period PR-AUC", f"{comp['current']:.3f}", delta_html(comp["delta"]*100, "absolute change (pp x100)")), ("Degraded?", "YES — investigate" if comp["degraded"] else "No", "threshold −0.05 PR-AUC"), ("Calibration gap", f"{cur_metrics['mean_predicted_probability']-cur_metrics['observed_churn_rate']:+.1%}", "predicted vs observed churn")])
+            st.write(comp["note"])
+            st.write(f"Later cohort: {len(cur_data)} customers · observed churn {cur_metrics['observed_churn_rate']:.1%} vs mean predicted {cur_metrics['mean_predicted_probability']:.1%}.")
+            st.dataframe(pd.DataFrame({"reference_holdout": ref_metrics, "later_period": {kk: cur_metrics[kk] for kk in ref_metrics}}), use_container_width=True)
+            import json, pathlib
+            art = pathlib.Path("cortexora/models/artifacts/churn_evaluation.json")
+            if art.exists():
+                meta = json.loads(art.read_text()); st.caption(f"Registered artifact: {meta.get('model_version','?')} · trained {meta.get('trained_at','?')} · data cutoff {meta.get('data_cutoff','?')} · {meta.get('training_data','')}")
+        except ValueError as e: st.error(str(e))
