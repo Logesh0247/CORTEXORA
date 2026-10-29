@@ -21,6 +21,8 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 Docker: `docker build -t cortexora . && docker run -p 8501:8501 cortexora`
 
+**Custom web UI (bespoke, fully interactive):** `.venv/bin/python web/server.py` → http://localhost:8502 — a from-scratch single-page dashboard over the same analytics API (see `docs/13_WEB_UI.md`). The Streamlit app above remains the full 13-module product; the web UI is its fast Mission-Control surface.
+
 ## What is implemented (all verified by tests / in-app execution)
 | Area | Capability |
 |---|---|

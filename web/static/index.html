@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CORTEXORA — Intelligence Engine</title>
+<style>
+:root{--bg:#060b16;--panel:rgba(16,30,54,.78);--line:#22406b;--txt:#e9f1fc;--mut:#93aed2;--a:#38bdf8;--b:#818cf8;--g:#34d399;--warn:#fbbf24;--bad:#fb7185}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:radial-gradient(1000px 500px at 90% -10%,rgba(56,189,248,.18),transparent 60%),radial-gradient(800px 420px at 5% 0,rgba(129,140,248,.14),transparent 55%),var(--bg);color:var(--txt)}
+a{color:inherit}
+.wrap{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
+.rail{position:sticky;top:0;height:100vh;padding:20px 16px;background:linear-gradient(180deg,rgba(10,22,42,.96),rgba(6,12,24,.96));border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.logo{font-size:1.35rem;font-weight:900;letter-spacing:.02em}.logo span{background:linear-gradient(90deg,#7dd3fc,#a5b4fc);-webkit-background-clip:text;background-clip:text;color:transparent}
+.tagline{font-size:.72rem;color:var(--mut);line-height:1.5;margin:4px 0 16px}
+.rail a.nav{display:flex;gap:10px;padding:10px 12px;border-radius:10px;text-decoration:none;color:#c6d6ee;font-weight:600;font-size:.9rem;border:1px solid transparent}
+.rail a.nav:hover{background:rgba(56,189,248,.1);border-color:var(--line);transform:translateX(2px)}
+.rail .sec{font-size:.66rem;letter-spacing:.12em;color:#6f8db3;margin:14px 4px 4px;font-weight:800}
+.live{margin-top:auto;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.45);border-radius:12px;padding:10px 12px;font-size:.78rem;color:#a7f3d0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--g);margin-right:7px;animation:pulse 1.6s infinite}@keyframes pulse{50%{opacity:.35}}
+main{padding:22px 26px 60px;max-width:1460px;width:100%;margin:0 auto}
+.hero{position:relative;overflow:hidden;background:linear-gradient(110deg,#0b2447,#123a6e 48%,#2b2a72);border:1px solid #2f5b8f;border-radius:20px;padding:26px 28px;box-shadow:0 16px 40px rgba(0,0,0,.4)}
+.hero h1{margin:2px 0 6px;font-size:2rem;letter-spacing:-.02em}.hero p{color:#bcd7f7;margin:0;max-width:760px;line-height:1.55}
+.pill{display:inline-block;margin-top:12px;margin-right:7px;background:rgba(125,211,252,.14);border:1px solid rgba(125,211,252,.45);padding:4px 12px;border-radius:999px;font-size:.74rem;font-weight:700;color:#d8efff}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;backdrop-filter:blur(8px)}
+section{margin-top:22px}h2{font-size:1.15rem;margin:0 0 4px}h3{margin:0 0 8px}.sub{color:var(--mut);font-size:.88rem;margin:0 0 12px;line-height:1.5}
+.controls{position:sticky;top:12px;z-index:20;box-shadow:0 12px 30px rgba(0,0,0,.35)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.row+.row{margin-top:10px}
+.chip{cursor:pointer;border:1px solid #2b4a73;background:#0d1a2e;color:#c6d6ee;border-radius:999px;padding:7px 14px;font-weight:700;font-size:.82rem;transition:.15s}
+.chip:hover{border-color:var(--a);transform:translateY(-1px)}.chip.on{background:linear-gradient(90deg,#0284c7,#4f46e5);color:#fff;border-color:transparent}
+.chip.mini{padding:5px 11px;font-size:.76rem}
+select{background:#0d1a2e;color:var(--txt);border:1px solid #27466e;border-radius:9px;padding:8px 10px;font-weight:600}
+label.lab{font-size:.72rem;color:var(--mut);font-weight:800;letter-spacing:.07em;text-transform:uppercase;margin-right:2px}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.kpi{background:linear-gradient(160deg,#122540,#0b1729);border:1px solid #264873;border-radius:15px;padding:16px;transition:.15s}.kpi:hover{border-color:var(--a);transform:translateY(-3px)}
+.kpi .l{font-size:.68rem;color:#8fb0d8;font-weight:800;letter-spacing:.09em;text-transform:uppercase}.kpi .v{font-size:1.5rem;font-weight:900;margin:4px 0 2px}.kpi .s{font-size:.78rem;color:var(--mut)}
+.up{color:var(--g);font-weight:800}.down{color:var(--bad);font-weight:800}
+.grid2{display:grid;grid-template-columns:1.65fr 1fr;gap:14px}.grid2b{display:grid;grid-template-columns:1.25fr 1fr;gap:14px}
+svg text{fill:#8fb0d8;font-size:11px}
+.bar-row{display:grid;grid-template-columns:110px 1fr 90px;gap:10px;align-items:center;padding:8px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent}
+.bar-row:hover{background:rgba(56,189,248,.08);border-color:var(--line)}.bar-row.sel{background:rgba(56,189,248,.14);border-color:var(--a)}
+.track{height:14px;background:#0a1526;border-radius:99px;overflow:hidden}.fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#0284c7,#818cf8)}
+table{width:100%;border-collapse:collapse;font-size:.86rem}th{color:#8fb0d8;text-align:left;font-size:.7rem;letter-spacing:.07em;text-transform:uppercase;padding:8px}td{padding:8px;border-top:1px solid rgba(60,100,155,.25)}
+tbody tr{cursor:pointer}tbody tr:hover{background:rgba(56,189,248,.07)}tbody tr.sel{background:rgba(56,189,248,.14)}
+input[type=range]{width:100%;accent-color:#38bdf8}
+.metric-out{font-size:1.35rem;font-weight:900}
+.feats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.feat{background:linear-gradient(160deg,rgba(23,48,84,.9),rgba(9,20,38,.95));border:1px solid #254873;border-radius:15px;padding:15px;cursor:pointer;transition:.15s}.feat:hover{border-color:var(--a);transform:translateY(-3px)}
+.feat .ic{font-size:1.5rem}.feat h4{margin:6px 0 4px}.feat p{margin:0;color:var(--mut);font-size:.8rem;line-height:1.45}
+.chat{height:330px;overflow-y:auto;display:flex;flex-direction:column;gap:9px;padding:6px 2px}
+.msg{max-width:88%;padding:10px 13px;border-radius:13px;line-height:1.5;font-size:.9rem;white-space:pre-wrap}
+.msg.bot{background:#10233f;border:1px solid #24466e;align-self:flex-start}.msg.me{background:linear-gradient(90deg,#0284c7,#4f46e5);align-self:flex-end;color:#fff}
+.chatbar{display:flex;gap:8px;margin-top:10px}.chatbar input{flex:1;background:#0d1a2e;border:1px solid #27466e;border-radius:10px;color:var(--txt);padding:11px 13px}
+.btn{cursor:pointer;background:linear-gradient(90deg,#0284c7,#4f46e5);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-weight:800}
+.btn.ghost{background:#0d1a2e;border:1px solid #2b4a73;color:#c6d6ee}
+footer{color:#5f7ea3;font-size:.78rem;margin-top:26px;line-height:1.6}
+@media(max-width:1050px){.wrap{grid-template-columns:1fr}.rail{position:static;height:auto}.kpis{grid-template-columns:repeat(2,1fr)}.grid2,.grid2b{grid-template-columns:1fr}.feats{grid-template-columns:repeat(2,1fr)}}
+</style></head>
+<body><div class="wrap">
+<aside class="rail">
+  <div class="logo">🧠 <span>CORTEXORA</span></div>
+  <div class="tagline">The Intelligence Engine for Predictive Business Decisions<br><i>Predict the Future. Optimize the Present. Engineer Business Growth.</i></div>
+  <div class="sec">COMMAND</div>
+  <a class="nav" href="#command">🏠 Mission Control</a><a class="nav" href="#explorer">📈 Performance Explorer</a><a class="nav" href="#scenario">🧪 Scenario Lab</a>
+  <div class="sec">INVESTIGATE</div>
+  <a class="nav" href="#products">🏆 Product Leaderboard</a><a class="nav" href="#features">🌌 Feature Universe</a>
+  <div class="sec">GET HELP</div>
+  <a class="nav" href="#assistant">🤖 AI Assistant</a>
+  <div class="live"><span class="dot"></span><b>LIVE</b> · analytics API connected<br><span id="liveMeta" style="color:#8fb0d8">loading…</span></div>
+</aside>
+<main>
+  <div class="hero" id="command">
+    <div style="font-size:.74rem;letter-spacing:.18em;color:#7dd3fc;font-weight:800">CORTEXORA · MISSION CONTROL</div>
+    <h1>Your business, one intelligent command centre.</h1>
+    <p>Every control on this page talks to the live CORTEXORA analytics engine. Change a filter, click a chart, move a scenario lever — the numbers answer immediately.</p>
+    <span class="pill">⚠️ Synthetic demo data (seed=42)</span><span class="pill">📊 Real computed analytics</span><span class="pill">🤖 AI Assistant inside</span>
+  </div>
+
+  <section class="card controls">
+    <div class="row"><span class="lab">Period</span><span id="presets"></span>
+      <span class="lab" style="margin-left:14px">Metric</span><select id="metric"><option>Revenue</option><option>Profit</option><option>Units</option><option>Orders</option></select>
+      <span class="lab">Granularity</span><select id="gran"><option>Weekly</option><option>Daily</option><option>Monthly</option></select>
+      <span class="lab">Split by</span><select id="breakdown"><option>Total</option><option>Category</option><option>Region</option><option>Channel</option></select></div>
+    <div class="row"><span class="lab">Categories</span><span id="catChips"></span></div>
+    <div class="row"><span class="lab">Regions</span><span id="regChips"></span><span class="lab" style="margin-left:10px">Channels</span><span id="chanChips"></span>
+      <button class="chip mini" id="resetBtn">↺ Reset all</button></div>
+  </section>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="grid2" id="explorer">
+    <div class="card"><h3>📈 Performance explorer</h3><p class="sub" id="chartTitle">—</p><div id="chart"></div></div>
+    <div class="card" id="scenario"><h3>🧪 Scenario Lab</h3><p class="sub">Assumption-based — not a guaranteed prediction. Baseline follows your filters above.</p>
+      <label class="lab">Price change <b id="pVal">+5%</b></label><input type="range" id="scPrice" min="-20" max="30" value="5">
+      <label class="lab">Demand change <b id="dVal">+10%</b></label><input type="range" id="scDemand" min="-30" max="50" value="10">
+      <label class="lab">Discount reduction <b id="dcVal">2 pts</b></label><input type="range" id="scDisc" min="0" max="10" value="2">
+      <div style="margin-top:10px">Projected revenue<div class="metric-out" id="projRev">—</div><div class="sub" id="projRevD"></div>
+      Projected profit<div class="metric-out" id="projProf">—</div><div class="sub" id="projProfD"></div></div>
+    </div>
+  </section>
+
+  <section class="grid2b">
+    <div class="card"><h3>🖱️ Category performance — click a bar to filter the leaderboard</h3><div id="catBars"></div><div class="sub" id="catSelNote"></div></div>
+    <div class="card"><h3>🗺️ Regional mix</h3><div id="donut" style="text-align:center"></div><div id="donutLegend" class="sub" style="text-align:center"></div></div>
+  </section>
+
+  <section class="grid2b">
+    <div class="card" id="insights"><h3>🧭 Operating picture</h3><div id="insightCards"></div></div>
+    <div class="card"><h3>🏆 Product leaderboard <span class="sub" id="prodNote"></span></h3>
+      <div style="max-height:380px;overflow:auto"><table><thead><tr><th>Product</th><th>Revenue</th><th>Margin</th><th>Units</th></tr></thead><tbody id="prodBody"></tbody></table></div>
+      <div id="prodDetail" class="sub" style="margin-top:10px">Select a product row to inspect it.</div></div>
+  </section>
+
+  <section id="features"><h2>🌌 Feature universe — every module, one click</h2><p class="sub">These open the corresponding analysis in the AI Assistant, or search:</p>
+    <div class="row" style="margin-bottom:12px"><input id="featSearch" placeholder="🔎 search features… churn, forecast, budget" style="background:#0d1a2e;border:1px solid #27466e;border-radius:10px;color:var(--txt);padding:10px 13px;min-width:280px"></div>
+    <div class="feats" id="featGrid"></div></section>
+
+  <section class="card" id="assistant"><h2>🤖 CORTEXORA AI Assistant</h2>
+    <p class="sub">Answers computed live from the warehouse — try “Why did revenue change?”, “Which products may stock out?”, “Forecast Electronics demand”.</p>
+    <div class="row" id="sugRow"></div>
+    <div class="chat" id="chatBox"></div>
+    <div class="chatbar"><input id="chatIn" placeholder="Ask about your business…"><button class="btn" id="chatSend">Send ➤</button></div>
+  </section>
+
+  <footer>CORTEXORA · Custom web UI served by <code>web/server.py</code> over the same analytics as the Streamlit app (which remains at port 8501). Data shown is synthetic demo data — methods and calculations are real; business figures are illustrative.</footer>
+</main></div>
+<script>
+const $=s=>document.querySelector(s);
+const state={days:10000,cats:new Set(),regs:new Set(),chans:new Set(),selCat:null,data:null};
+const COLORS=["#38bdf8","#818cf8","#34d399","#fbbf24","#fb7185","#22d3ee","#a78bfa","#f472b6"];
+const fmt$=v=>"$"+Math.round(v).toLocaleString();
+function chip(el,label,on,cb){const c=document.createElement("button");c.className="chip mini"+(on?" on":"");c.textContent=label;c.onclick=()=>cb(!on);el.appendChild(c)}
+async function load(){
+  const q=new URLSearchParams({days:state.days,metric:$("#metric").value,gran:$("#gran").value,breakdown:$("#breakdown").value,
+    cats:[...state.cats].join(","),regs:[...state.regs].join(","),chans:[...state.chans].join(",")});
+  const r=await fetch("/api/dashboard?"+q); state.data=await r.json(); render();
+}
+function render(){
+  const d=state.data,k=d.kpis;
+  $("#liveMeta").textContent=d.insights.records.toLocaleString()+" records in scope · data → "+d.insights.data_through;
+  const dlt=(v,s)=>`<span class="${v>=0?'up':'down'}">${v>=0?'▲':'▼'} ${Math.abs(v)}%</span> ${s}`;
+  $("#kpis").innerHTML=[["Revenue",fmt$(k.revenue),dlt(k.revenue_delta,"vs prior period")],["Profit",fmt$(k.profit),dlt(k.profit_delta,"vs prior period")],
+    ["Margin",(k.margin*100).toFixed(1)+"%","profit / revenue"],["Orders",k.orders.toLocaleString(),dlt(k.orders_delta,"vs prior period")],
+    ["Avg order value",fmt$(k.aov),k.customers.toLocaleString()+" customers"]].map(x=>`<div class="kpi"><div class="l">${x[0]}</div><div class="v">${x[1]}</div><div class="s">${x[2]}</div></div>`).join("");
+  drawChart(d.trend); drawCats(d.categories); drawDonut(d.regions); drawProducts(d.products); drawInsights(d.insights); scenario();
+  $("#chartTitle").textContent=$("#metric").value+" · "+$("#gran").value+(($("#breakdown").value!=="Total")?" · by "+$("#breakdown").value:"");
+}
+function drawChart(tr){
+  const W=760,H=330,P={l:56,r:14,t:12,b:30},iw=W-P.l-P.r,ih=H-P.t-P.b;
+  const all=tr.series.flatMap(s=>s.data),mx=Math.max(...all,1),mn=Math.min(0,...all);
+  const X=i=>P.l+iw*(tr.labels.length<2?0:i/(tr.labels.length-1)),Y=v=>P.t+ih-(v-mn)/(mx-mn)*ih;
+  let h=`<svg viewBox="0 0 ${W} ${H}" style="width:100%">`;
+  for(let i=0;i<=4;i++){const y=P.t+ih*i/4,v=mx-(mx-mn)*i/4;h+=`<line x1="${P.l}" y1="${y}" x2="${W-P.r}" y2="${y}" stroke="rgba(90,130,180,.18)"/><text x="4" y="${y+4}">${Math.round(v).toLocaleString()}</text>`}
+  tr.series.forEach((s,si)=>{const pts=s.data.map((v,i)=>X(i)+","+Y(v)).join(" ");
+    if(si===0)h+=`<polygon points="${P.l},${Y(0)} ${pts} ${X(s.data.length-1)},${Y(0)}" fill="rgba(56,189,248,.15)"/>`;
+    h+=`<polyline points="${pts}" fill="none" stroke="${COLORS[si%8]}" stroke-width="2.4"/>`;
+    s.data.forEach((v,i)=>{h+=`<circle cx="${X(i)}" cy="${Y(v)}" r="3.4" fill="${COLORS[si%8]}"><title>${s.name} · ${tr.labels[i]}: ${Math.round(v).toLocaleString()}</title></circle>`})});
+  const step=Math.max(1,Math.floor(tr.labels.length/6));
+  tr.labels.forEach((l,i)=>{if(i%step===0)h+=`<text x="${X(i)-18}" y="${H-8}">${l.slice(2,10)}</text>`});
+  $("#chart").innerHTML=h+"</svg>"+(tr.series.length>1?`<div class="sub">${tr.series.map((s,i)=>`<span style="color:${COLORS[i%8]}">●</span> ${s.name}`).join(" · ")}</div>`:"");
+}
+function drawCats(cats){
+  const metricCats = state.selCat?cats: cats; const mx=Math.max(...cats.map(c=>c.value),1);
+  $("#catBars").innerHTML=cats.map((c,i)=>`<div class="bar-row ${state.selCat===c.name?'sel':''}" data-cat="${c.name}"><b>${c.name}</b><div class="track"><div class="fill" style="width:${c.value/mx*100}%;background:linear-gradient(90deg,${COLORS[i%8]},${COLORS[(i+3)%8]})"></div></div><span>${fmt$(c.value)}</span></div>`).join("");
+  document.querySelectorAll(".bar-row").forEach(r=>r.onclick=()=>{state.selCat=state.selCat===r.dataset.cat?null:r.dataset.cat;drawCats(state.data.categories);drawProducts(state.data.products)});
+  $("#catSelNote").textContent=state.selCat?("Filtering leaderboard to "+state.selCat+" — click again to clear."):"Tip: totals respect the filters at the top; clicking narrows the leaderboard further.";
+}
+function drawDonut(regs){
+  const tot=regs.reduce((a,r)=>a+r.value,0)||1;let off=25,h="";
+  regs.forEach((r,i)=>{const p=r.value/tot*100;h+=`<circle r="64" cx="90" cy="90" fill="none" stroke="${COLORS[i%8]}" stroke-width="22" stroke-dasharray="${p*4.02} 402" stroke-dashoffset="${-off*4.02+100}" transform="rotate(-90 90 90)"><title>${r.name}: ${(p).toFixed(1)}%</title></circle>`;off+=p});
+  $("#donut").innerHTML=`<svg viewBox="0 0 180 180" style="width:190px">${h}<text x="90" y="86" text-anchor="middle" style="font-size:13px;fill:#fff;font-weight:800">${fmt$(tot)}</text><text x="90" y="104" text-anchor="middle">in scope</text></svg>`;
+  $("#donutLegend").innerHTML=regs.map((r,i)=>`<span style="color:${COLORS[i%8]}">●</span> ${r.name} ${(r.value/tot*100).toFixed(0)}%`).join(" · ");
+}
+function drawProducts(prods){
+  const list=state.selCat?prods.filter(p=>p.category===state.selCat):prods;
+  $("#prodNote").textContent=state.selCat?("— "+state.selCat):"";
+  $("#prodBody").innerHTML=list.map((p,i)=>`<tr data-i="${i}"><td><b>${p.product_name}</b><br><span style="color:#8fb0d8">${p.category}</span></td><td>${fmt$(p.revenue)}</td><td>${(p.margin*100).toFixed(1)}%</td><td>${Math.round(p.units).toLocaleString()}</td></tr>`).join("")||`<tr><td colspan="4">No products in this selection.</td></tr>`;
+  document.querySelectorAll("#prodBody tr").forEach(tr=>tr.onclick=()=>{document.querySelectorAll("#prodBody tr").forEach(x=>x.classList.remove("sel"));tr.classList.add("sel");
+    const p=list[+tr.dataset.i];$("#prodDetail").innerHTML=`<b style="color:#fff">📦 ${p.product_name}</b> (${p.category}) · revenue <b style="color:#fff">${fmt$(p.revenue)}</b> · profit ${fmt$(p.profit)} · margin ${(p.margin*100).toFixed(1)}% · ${Math.round(p.units).toLocaleString()} units · ${p.orders.toLocaleString()} orders. Next step: ask the Assistant “Forecast ${p.category} demand” or test a price move.`});
+}
+function drawInsights(ins){
+  $("#insightCards").innerHTML=[["🏆 Revenue leader",`<b>${ins.top_category}</b> · ${fmt$(ins.top_category_value)} in current scope`],
+   ["🗺️ Strongest region",`<b>${ins.top_region}</b> leads the current view`],["⚠️ Margin watch",`<b>${ins.margin_watch}</b> has the thinnest margin — check Pricing before discounting`]]
+   .map(x=>`<div style="margin-bottom:12px"><h4 style="margin:0 0 3px">${x[0]}</h4><p class="sub" style="margin:0">${x[1]}</p></div>`).join("");
+}
+function scenario(){
+  if(!state.data)return;const k=state.data.kpis,p=+$("#scPrice").value,dm=+$("#scDemand").value,dc=+$("#scDisc").value;
+  $("#pVal").textContent=(p>=0?"+":"")+p+"%";$("#dVal").textContent=(dm>=0?"+":"")+dm+"%";$("#dcVal").textContent=dc+" pts";
+  const gain=k.revenue*(dc/100)*.35,rev=k.revenue*(1+p/100)*(1+dm/100)+gain,prof=k.profit*(1+p/100)*(1+dm/100)+gain;
+  $("#projRev").textContent=fmt$(rev);$("#projRevD").innerHTML=`<span class="${rev>=k.revenue?'up':'down'}">${k.revenue?(rev/k.revenue-1>=0?'+':'')+((rev/k.revenue-1)*100).toFixed(1):0}%</span> vs current scope`;
+  $("#projProf").textContent=fmt$(prof);$("#projProfD").innerHTML=`<span class="${prof>=k.profit?'up':'down'}">${k.profit?((prof/k.profit-1)*100).toFixed(1):0}%</span> vs current scope`;
+}
+const CATS=["Electronics","Apparel","Home","Beauty"],REGS=["North","South","East","West"],CHANS=["Online","Store","Marketplace"];
+state.cats=new Set(CATS);state.regs=new Set(REGS);state.chans=new Set(CHANS);
+function chipGroup(el,set,all){const render=()=>{el.innerHTML="";all.forEach(x=>chip(el,x,set.has(x),on=>{on?set.add(x):set.delete(x);render();load()}))};render()}
+chipGroup($("#catChips"),state.cats,CATS);chipGroup($("#regChips"),state.regs,REGS);chipGroup($("#chanChips"),state.chans,CHANS);
+[["All",10000],["30D",30],["90D",90],["6M",182],["1Y",365]].forEach(([l,v],i)=>chip($("#presets"),l,state.days===v,()=>{state.days=v;document.querySelectorAll("#presets .chip").forEach(c=>c.classList.remove("on"));event.target.classList.add("on");load()}));
+["metric","gran","breakdown"].forEach(id=>$("#"+id).onchange=load);
+["scPrice","scDemand","scDisc"].forEach(id=>$("#"+id).oninput=scenario);
+$("#resetBtn").onclick=()=>{state.cats=new Set(CATS);state.regs=new Set(REGS);state.chans=new Set(CHANS);state.days=10000;state.selCat=null;location.reload()};
+const FEATURES=[["📈","Business Growth","Revenue drivers & segments","Why did revenue change?"],["🎯","Marketing Performance","CAC & budget optimisation","Best marketing channel?"],["🥊","Competitor Intelligence","Price gaps & alerts","Where can I see competitor prices?"],["🔮","Demand Forecasting","Forecasts & reorder plans","Forecast Electronics demand"],["👥","Customer Intelligence","Churn risk & RFM","Which customers are at churn risk?"],["💲","Pricing Optimization","Scenarios & break-even","What is margin?"],["🤖","AI Assistant","Ask anything","help"],["🧠","Decision Engine","Ranked, tracked actions","What should we do next?"],["🧪","Experiments Lab","A/B tests & causality","Where can I run an A/B test?"],["🩺","Monitoring","Quality, drift, model health","How much data do we have?"],["📄","Reports","Executive downloads","Where can I download a report?"],["⚙️","Settings & About","Definitions & system","What is revenue?"]];
+function drawFeats(f=""){$("#featGrid").innerHTML=FEATURES.filter(x=>(x[1]+x[2]).toLowerCase().includes(f.toLowerCase())).map(x=>`<div class="feat" data-q="${x[3]}"><div class="ic">${x[0]}</div><h4>${x[1]}</h4><p>${x[2]}</p><p style="margin-top:7px;color:#7dd3fc;font-weight:700">Ask: “${x[3]}” →</p></div>`).join("");
+  document.querySelectorAll(".feat").forEach(el=>el.onclick=()=>{ask(el.dataset.q);document.querySelector("#assistant").scrollIntoView({behavior:"smooth"})})}
+drawFeats();$("#featSearch").oninput=e=>drawFeats(e.target.value);
+const SUGS=["What is our revenue and profit?","Why did revenue change?","Forecast Electronics demand","Which products may stock out?","Which customers are at churn risk?","Best marketing channel?","What should we do next?"];
+SUGS.forEach(s=>chip($("#sugRow"),s,false,()=>ask(s)));
+function bubble(txt,me,table){const m=document.createElement("div");m.className="msg "+(me?"me":"bot");m.textContent=txt;$("#chatBox").appendChild(m);
+  if(table&&table.length){const t=document.createElement("div");t.className="msg bot";t.style.maxWidth="96%";t.innerHTML="<table>"+Object.keys(table[0]).map(k=>`<th>${k}</th>`).join("")+table.map(r=>"<tr>"+Object.values(r).map(v=>`<td>${v}</td>`).join("")+"</tr>").join("")+"</table>";$("#chatBox").appendChild(t)}
+  $("#chatBox").scrollTop=1e6}
+async function ask(q){if(!q.trim())return;bubble(q,true);$("#chatIn").value="";
+  const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q})});const a=await r.json();
+  bubble(a.text||a.error,false,a.table);if(a.navigate)bubble("➡️ In the full app this lives in: "+a.navigate+" (sidebar module).",false)}
+$("#chatSend").onclick=()=>ask($("#chatIn").value);
+$("#chatIn").onkeydown=e=>{if(e.key==="Enter")ask(e.target.value)};
+bubble("Hi, I'm the CORTEXORA Assistant 🤖. Every answer I give is computed live from the warehouse. Tap a suggestion or type a question.",false);
+load();
+</script></body></html>
