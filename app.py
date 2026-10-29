@@ -6,7 +6,8 @@ from cortexora.config import DB_PATH
 from cortexora.pipelines.etl import load_table
 from cortexora.analytics.metrics import enrich, kpis, period_compare, marketing_metrics
 from cortexora.models.forecasting import weekly_series, evaluate, forecast_next, rfm
-from cortexora.decision_engine.engine import stockout_recommendations, churn_recommendations, persist, set_status
+from cortexora.decision_engine.engine import stockout_recommendations, churn_recommendations, inventory_recommendations, budget_recommendation, discount_recommendation, persist, set_status
+from cortexora.optimization.optimize import reorder_plan, daily_demand_stats, discount_effectiveness, breakeven_units, optimize_budget
 
 st.set_page_config(page_title="CORTEXORA", layout="wide")
 if not DB_PATH.exists():
@@ -49,6 +50,12 @@ elif page == "Demand Forecasting":
     fc = forecast_next(s); hist = s.reset_index(); hist.columns = ["week","forecast"]
     st.plotly_chart(px.line(pd.concat([hist.tail(26), fc]), x="week", y="forecast", title=f"{cat} weekly demand: history + forecast (80% interval in table)"), use_container_width=True)
     st.dataframe(fc, use_container_width=True)
+    st.subheader("Inventory reorder plan (forecast-based, 95% service-level assumption)")
+    stats = daily_demand_stats(df)
+    stock = inv.merge(products[["product_id","category","unit_cost","list_price"]], on="product_id").merge(stats, on="product_id", how="left").fillna(0)
+    plan = reorder_plan(stock)
+    st.dataframe(plan[["product_id","category","stock_on_hand","forecast_daily","lead_time_days","safety_stock","recommended_reorder_qty","estimated_order_cost","stockout_risk"]], use_container_width=True)
+    st.download_button("Download reorder plan CSV", plan.to_csv(index=False), "reorder_plan.csv")
 
 elif page == "Pricing Simulator":
     st.title("Pricing & Profit — assumption-based simulator")
@@ -58,6 +65,12 @@ elif page == "Pricing Simulator":
     sold = items[items.product_id==row.product_id]; base_q, base_rev = sold.qty.sum(), (sold.qty*sold.unit_price*(1-sold.discount)).sum()
     new_q = base_q*(1+elas*chg/100); new_rev = new_q*row.list_price*(1+chg/100)
     st.metric("Scenario revenue", f"${new_rev:,.0f}", f"{new_rev/base_rev-1:+.1%} vs observed ${base_rev:,.0f} (observed 24-mo total)")
+    st.subheader("Discount effectiveness (observed association — NOT a causal effect)")
+    st.dataframe(discount_effectiveness(f), use_container_width=True)
+    st.subheader("Break-even analysis")
+    fixed = st.number_input("Monthly fixed cost to cover ($)", value=10000.0, step=1000.0)
+    be = breakeven_units(fixed, row.list_price, row.unit_cost)
+    st.write(f"{p}: contribution/unit = ${row.list_price-row.unit_cost:,.2f} → break-even = {'never (contribution ≤ 0)' if be==float('inf') else f'{be:,.0f} units'}")
 
 elif page == "Customer Intelligence":
     st.title("Customer Intelligence (RFM + Churn Model)")
@@ -87,13 +100,23 @@ elif page == "Marketing Performance":
     st.title("Marketing Performance"); st.caption("CAC is a spend/conversions proxy. ROAS is not shown: no attribution join exists in this data — attributed ≠ incremental.")
     st.dataframe(marketing_metrics(mkt), use_container_width=True)
     st.plotly_chart(px.bar(mkt.groupby("channel").spend.sum().reset_index(), x="channel", y="spend"), use_container_width=True)
+    st.subheader("Budget allocation optimizer (fitted response curves, scenarios — not causal incrementality)")
+    budget = st.slider("Total weekly budget ($)", 500, 10000, 3300)
+    opt = optimize_budget(mkt, total_budget=float(budget))
+    st.dataframe(opt["curves"], use_container_width=True); st.caption(opt.get("note",""))
+    if "expected_gain_pct" in opt:
+        st.metric("Expected conversions change vs current shares (same budget)", f"{opt['expected_gain_pct']:+.1f}%")
+        comp = pd.DataFrame({"channel": list(opt["allocation"]), "current": [opt["current_allocation"][c] for c in opt["allocation"]], "optimized": list(opt["allocation"].values())})
+        st.plotly_chart(px.bar(comp, x="channel", y=["current","optimized"], barmode="group"), use_container_width=True)
 
 elif page == "Decision Intelligence Engine":
     st.title("Decision Intelligence Engine")
     st.caption("Priority = √expected_impact × confidence × urgency. Human approval required — no autonomous actions.")
-    daily = df.groupby([df.order_date.dt.date,"product_id"]).qty.sum().groupby("product_id").agg(["mean","std"]).fillna(0)
-    stock = inv.merge(products[["product_id","category"]], on="product_id"); stock["forecast_daily"] = stock.product_id.map(daily["mean"]); stock["daily_sd"] = stock.product_id.map(daily["std"])
-    recs = stockout_recommendations(stock) + churn_recommendations(rfm(orders, items))
+    stats = daily_demand_stats(df)
+    stock = inv.merge(products[["product_id","category","unit_cost","list_price"]], on="product_id").merge(stats, on="product_id", how="left").fillna(0)
+    plan = reorder_plan(stock)
+    recs = (inventory_recommendations(plan) + budget_recommendation(optimize_budget(mkt))
+            + discount_recommendation(discount_effectiveness(df)) + churn_recommendations(rfm(orders, items)))
     if st.button("Generate recommendations from current data"): persist(recs, DB_PATH); st.success(f"{len(recs)} generated (duplicates ignored)")
     with sqlite3.connect(DB_PATH) as con: dec = pd.read_sql("SELECT * FROM decisions ORDER BY priority DESC", con)
     for r in dec.itertuples():

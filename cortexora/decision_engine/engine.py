@@ -37,3 +37,32 @@ def set_status(rid: str, status: str, db_path) -> None:
     import sqlite3
     with sqlite3.connect(db_path) as con:
         con.execute("UPDATE decisions SET status=?, decided_at=? WHERE recommendation_id=?", (status, pd.Timestamp.now().isoformat(), rid))
+
+def inventory_recommendations(plan) -> list[dict]:
+    """From optimization.reorder_plan output (forecast-based, Phase 5)."""
+    out = []
+    for r in plan.itertuples():
+        if r.stockout_risk == "High" and r.recommended_reorder_qty > 0:
+            out.append(_rec("Inventory", f"{r.category} product {int(r.product_id)} forecast to stock out before replenishment",
+                f"Reorder {int(r.recommended_reorder_qty)} units (est. cost ${r.estimated_order_cost:,.0f})",
+                f"stock={int(r.stock_on_hand)}, forecast {r.forecast_daily:.1f}/day, lead={int(r.lead_time_days)}d, expected shortfall={r.expected_stockout_units_no_action:.0f} units (scenario, 95% service-level assumption)",
+                getattr(r, "margin_at_risk", r.expected_stockout_units_no_action), 0.75, 1.0))
+    return out
+
+def budget_recommendation(opt: dict) -> list[dict]:
+    if opt.get("expected_gain_pct", 0) <= 5: return []
+    shifts = "; ".join(f"{c}: ${opt['current_allocation'][c]:,.0f}→${v:,.0f}/wk" for c, v in opt["allocation"].items())
+    return [_rec("Marketing", "Current budget allocation is below the fitted optimum",
+        f"Reallocate weekly budget: {shifts}",
+        f"Fitted response curves estimate +{opt['expected_gain_pct']:.1f}% conversions at the same budget (model estimate on synthetic data, not incremental/causal)", 
+        opt["expected_optimized"] - opt["expected_current"], 0.5, 0.6)]
+
+def discount_recommendation(disc) -> list[dict]:
+    if disc.empty: return []
+    hi = disc.iloc[-1]; overall_margin = disc.profit.sum() / disc.revenue.sum()
+    if hi.revenue_share > 0.10 and hi.margin < overall_margin / 2:
+        return [_rec("Pricing", f"Deepest discount bucket ({hi.discount_bucket}) earns margin {hi.margin:.1%} vs {overall_margin:.1%} overall",
+            "Review 20%+ discount policy: test reducing depth on low-margin products (run as experiment before claiming causality)",
+            f"Observed association only: {hi.revenue_share:.1%} of revenue at avg discount {hi.avg_discount:.1%} — not a causal estimate",
+            float(hi.profit), 0.45, 0.5)]
+    return []

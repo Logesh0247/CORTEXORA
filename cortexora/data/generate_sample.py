@@ -30,8 +30,17 @@ def generate(out: Path, seed: int = 42, months: int = 24) -> dict[str, pd.DataFr
     orders, items = pd.DataFrame(rows_o), pd.DataFrame(rows_i)
     latest = orders.order_date.max()
     inv = pd.DataFrame([dict(product_id=p.product_id, snapshot_date=latest, stock_on_hand=int(rng.integers(5, 400)), lead_time_days=int(rng.integers(3,15))) for p in products.itertuples()])
-    mkt_rows = [dict(spend_date=d.date().isoformat(), channel=ch, spend=round(float(rng.uniform(200,1500)),2), clicks=int(rng.integers(500,5000)), conversions=int(rng.integers(20,300)))
-                for d in dates[::7] for ch in ["Search","Social","Email","Display"]]
+    # Marketing: conversions follow a KNOWN synthetic diminishing-returns response
+    # conversions = a * spend^b (b<1) * noise, so response-curve fitting (Phase 5)
+    # has real ground truth to recover. Channel efficiency differs deliberately.
+    channel_a = {"Search": 6.0, "Social": 3.5, "Email": 8.0, "Display": 1.8}
+    mkt_rows = []
+    for d in dates[::7]:
+        for ch, a in channel_a.items():
+            spend = float(rng.uniform(200, 1500))
+            conv = a * spend ** 0.55 * float(rng.normal(1, 0.12))
+            mkt_rows.append(dict(spend_date=d.date().isoformat(), channel=ch, spend=round(spend, 2),
+                                 clicks=int(spend * rng.uniform(2, 4)), conversions=max(1, int(conv))))
     frames = dict(customers=customers, products=products, orders=orders, order_items=items, inventory_snapshots=inv, marketing_spend=pd.DataFrame(mkt_rows))
     out.mkdir(parents=True, exist_ok=True)
     for name, df in frames.items(): df.to_csv(out / f"{name}.csv", index=False)
