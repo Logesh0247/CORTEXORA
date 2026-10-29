@@ -29,6 +29,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [pendingList, setPendingList] = useState<any[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [profOpen, setProfOpen] = useState(false);
+  const [dataset, setDataset] = useState<any>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const current = ALL_ROUTES.find((r) => r.href === path);
   const section = NAV.find((g) => g.items.some((i) => i.href === path))?.section || "";
@@ -40,6 +41,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   }, []);
   useEffect(() => { api("/api/decisions").then((d) => { const px = (d.decisions || []).filter((x: any) => x.status === "pending"); setPending(px.length); setPendingList(px.slice(0, 5)); }).catch(() => {}); }, [path]);
   useEffect(() => { setNotifOpen(false); setProfOpen(false); }, [path]);
+  useEffect(() => { api("/api/health").then(setDataset).catch(() => {}); }, [path]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette(true); }
@@ -78,7 +80,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <div className="mt-auto px-2 pt-4">
         {!collapsed && (<div className="card p-3 text-[12px]">
           <span className="status-dot pulse mr-1.5" style={{ background: "var(--good)", display: "inline-block" }} />
-          <b>Demo Data</b><div className="mut mt-1">Synthetic dataset (seed=42). Figures are illustrative; calculations are real.</div></div>)}
+          <b>{dataset?.mode === "uploaded" ? "Your Dataset — LIVE" : "Demo Data"}</b><div className="mut mt-1">{dataset?.mode === "uploaded" ? `${dataset.dataset}. Every page is computing on it.` : "Synthetic dataset (seed=42). Figures are illustrative; calculations are real."}</div></div>)}
         <button className="btn w-full mt-2 justify-center" onClick={() => setCollapsed(!collapsed)}>{collapsed ? "»" : "« Collapse"}</button>
       </div>
     </div>);
@@ -99,7 +101,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <select aria-label="Global period" defaultValue="10000" onChange={(e) => { localStorage.setItem("cx-days", e.target.value); window.dispatchEvent(new CustomEvent("cx-days", { detail: e.target.value })); }}
           title="Global period — updates the Home dashboard">
           <option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="182">Last 6 months</option><option value="365">Last year</option><option value="10000">All time</option></select>
-        <span className="chip hidden md:inline-flex" style={{ cursor: "default" }} title="The connected dataset. Upload your own in Data Sources.">🗂️ Demo dataset</span>
+        <button className="chip hidden md:inline-flex" onClick={() => router.push("/data-sources")} title={`${dataset?.dataset || "Dataset"} — click to manage datasets`}>
+          <span className="status-dot pulse" style={{ background: dataset?.mode === "uploaded" ? "var(--good)" : "var(--warn)", display: "inline-block" }} />
+          <span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{dataset?.mode === "uploaded" ? "📂 " + String(dataset.dataset).replace("Uploaded dataset: ", "") : "🗂️ Demo dataset"}</span></button>
         <div style={{ position: "relative" }}>
           <button className="btn" aria-label="Notifications" aria-haspopup="true" aria-expanded={notifOpen} title="Notifications" onClick={() => { setNotifOpen(!notifOpen); setProfOpen(false); }} style={{ position: "relative" }}>
             <Bell size={16} />{pending > 0 && <span style={{ position: "absolute", top: -6, right: -6, background: "var(--bad)", color: "#fff", borderRadius: 999, fontSize: 10, fontWeight: 800, padding: "0 5px" }}>{pending}</span>}</button>

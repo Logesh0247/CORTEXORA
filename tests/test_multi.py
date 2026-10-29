@@ -48,3 +48,16 @@ def test_zip_expansion_and_batch_combines_sales():
     assert batch["combined"]["kpis"]["revenue"] > 0
     kinds = {e["file"]: (e.get("result") or {}).get("kind") for e in batch["per_file"]}
     assert kinds["hr.csv"] == "generic"
+
+
+def test_frames_from_lines_builds_warehouse():
+    from cortexora.pipelines.multi import frames_from_lines, sales_lines
+    import pandas as pd
+    raw = pd.DataFrame({"date": ["2024-01-01", "2024-01-02"], "product": ["A", "B"],
+                        "qty": [2, 3], "unit_price": [10.0, 5.0], "customer_id": ["X", "Y"]})
+    d, _rep, _det = sales_lines(raw)
+    d["source_file"] = "f.csv"; d["product_key"] = d["product_name"].astype(str)
+    frames = frames_from_lines(d)
+    assert set(frames) == {"customers", "products", "orders", "order_items", "inventory_snapshots", "marketing_spend"}
+    assert len(frames["products"]) == 2 and frames["inventory_snapshots"]["stock_on_hand"].eq(0).all()
+    assert (frames["order_items"]["qty"] > 0).all()

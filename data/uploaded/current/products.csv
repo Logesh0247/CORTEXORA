@@ -1,0 +1,4 @@
+product_id,product_name,category,unit_cost,list_price
+1,Loser,Uncategorised,9.5,10.0
+2,Steady,Uncategorised,10.0,20.0
+3,Winner,Uncategorised,12.0,30.0

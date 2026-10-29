@@ -27,6 +27,13 @@ def _load():
     return df, orders, items, products, inv, mkt
 
 DF, ORDERS, ITEMS, PRODUCTS, INV, MKT = _load()
+
+def reload_data():
+    """Re-read the warehouse (after an uploaded dataset replaces it) so every
+    dashboard/chat computation in this process uses the NEW data."""
+    global DF, ORDERS, ITEMS, PRODUCTS, INV, MKT
+    DF, ORDERS, ITEMS, PRODUCTS, INV, MKT = _load()
+    return DF
 METRIC_COL = {"Revenue": "revenue", "Profit": "profit", "Units": "qty"}
 
 def dashboard(params: dict) -> dict:

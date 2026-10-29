@@ -237,6 +237,7 @@ def analyse_batch(files: list[tuple[str, bytes]], cost_ratio: float = 0.55) -> d
         per_file.append(entry)
 
     combined = None
+    _frames = None
     if sales_frames:
         all_d = pd.concat(sales_frames, ignore_index=True)
         qty_assumed = bool(all_d.groupby("source_file")["qty"].sum().min() >= 0) and any(
@@ -275,6 +276,58 @@ def analyse_batch(files: list[tuple[str, bytes]], cost_ratio: float = 0.55) -> d
                 links.append({"a": a["file"], "b": b["file"], "shared_columns": shared[:6],
                               "shared_roles": shared_roles,
                               "suggestion": "Potential join keys detected — verify values overlap before joining (not auto-joined)."})
-    return {"mode": "multi", "files_received": len(files), "files_expanded": len(expanded),
-            "per_file": per_file, "combined": combined, "cross_file_links": links,
+    if sales_frames:
+        try: _frames = frames_from_lines(pd.concat(sales_frames, ignore_index=True))
+        except Exception: _frames = None
+    out = {"mode": "multi", "files_received": len(files), "files_expanded": len(expanded),
+            "per_file": per_file, "combined": combined, "cross_file_links": links, "_frames": _frames,
             "limits": f"max {MAX_FILES} files, {MAX_MEMBER_BYTES // (1024 * 1024)} MB each; ZIP archives are expanded in memory"}
+    return out
+
+
+def frames_from_lines(all_d: pd.DataFrame) -> dict:
+    """Build the six CORTEXORA warehouse tables from combined uploaded lines.
+    Products/customers/orders are re-keyed globally (per-file IDs collide);
+    products unify by name. Inventory stock is unknown for uploads (0, lead 7d)
+    and marketing is empty without spend data — both stated in the UI."""
+    d = all_d.copy()
+    prods = (d.groupby("product_key").agg(category=("category", "first"),
+                                          unit_cost=("unit_cost", "median"),
+                                          list_price=("unit_price", "median")).reset_index())
+    prods["product_id"] = range(1, len(prods) + 1)
+    prod_map = dict(zip(prods["product_key"], prods["product_id"]))
+    d["new_product_id"] = d["product_key"].map(prod_map)
+
+    cust = d.groupby(["source_file", "customer_id"]).agg(first_seen=("order_date", "min")).reset_index()
+    cust["new_customer_id"] = range(1, len(cust) + 1)
+    cust_map = {(r.source_file, r.customer_id): r.new_customer_id for r in cust.itertuples()}
+    customers = pd.DataFrame({"customer_id": cust["new_customer_id"], "segment": "Uploaded",
+                              "region": "Unknown",
+                              "signup_date": pd.to_datetime(cust["first_seen"]).dt.date.astype(str)})
+
+    ords = (d.groupby(["source_file", "order_id"])
+              .agg(customer_id=("customer_id", "first"), src_file=("source_file", "first"),
+                   order_date=("order_date", "min"), region=("region", "first"),
+                   channel=("channel", "first")).reset_index())
+    ords["new_order_id"] = range(1, len(ords) + 1)
+    ord_map = {(r.source_file, r.order_id): r.new_order_id for r in ords.itertuples()}
+    d["new_order_id"] = [ord_map[(sf, oid)] for sf, oid in zip(d["source_file"], d["order_id"])]
+    d["new_customer_id"] = [cust_map[(sf, cid)] for sf, cid in zip(d["source_file"], d["customer_id"])]
+    orders = pd.DataFrame({"order_id": ords["new_order_id"],
+                           "customer_id": [cust_map[(r.source_file, r.customer_id)] for r in ords.itertuples()],
+                           "order_date": pd.to_datetime(ords["order_date"]).dt.date.astype(str),
+                           "region": ords["region"].astype(str), "channel": ords["channel"].astype(str)})
+    items = (d.groupby(["new_order_id", "new_product_id"])
+               .agg(qty=("qty", "sum"), unit_price=("unit_price", "mean"),
+                    discount=("discount", "mean"), unit_cost=("unit_cost", "mean")).reset_index()
+               .rename(columns={"new_order_id": "order_id", "new_product_id": "product_id"}))
+    items["qty"] = items["qty"].round().astype(int)
+    items = items[items["qty"] != 0]
+    products = prods.rename(columns={"product_key": "product_name"})[
+        ["product_id", "product_name", "category", "unit_cost", "list_price"]]
+    inv = pd.DataFrame({"product_id": products["product_id"],
+                        "snapshot_date": str(pd.to_datetime(d["order_date"]).max().date()),
+                        "stock_on_hand": 0, "lead_time_days": 7})
+    mkt = pd.DataFrame(columns=["spend_date", "channel", "spend", "clicks", "conversions"])
+    return {"customers": customers, "products": products, "orders": orders,
+            "order_items": items, "inventory_snapshots": inv, "marketing_spend": mkt}

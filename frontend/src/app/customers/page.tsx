@@ -22,6 +22,7 @@ export default function Customers() {
         <div style={{ height: 260 }}><ResponsiveContainer><BarChart data={data.segments}>
           <CartesianGrid strokeDasharray="3 3" opacity={.25} /><XAxis dataKey="segment" /><YAxis /><Tooltip />
           <Bar dataKey="customers" radius={[7, 7, 0, 0]}>{data.segments.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % 3]} />)}</Bar></BarChart></ResponsiveContainer></div>
+        {data.churn_model_note && <p className="text-[13px] mt-2" style={{ color: "var(--warn)" }}>ℹ️ {data.churn_model_note}</p>}
         {m && <p className="mut text-[13px] mt-2">Churn model <b>{m.best_model}</b> ({m.model_version}): ROC-AUC {best.roc_auc.toFixed(2)} · PR-AUC {best.pr_auc.toFixed(2)} vs baseline {m.results.baseline_majority.pr_auc.toFixed(2)} · observed churn {(m.churn_rate * 100).toFixed(1)}%. Synthetic-data metrics validate the pipeline, not real-world accuracy.</p>}</ChartCard>
       <ChartCard title="Customer table" sub="Searchable · sortable · click a customer for detail">
         <DataTable rows={data.customers_table} pageSize={9} onRow={setSel} columns={[

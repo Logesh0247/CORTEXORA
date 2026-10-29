@@ -8,6 +8,11 @@ export default function Marketing() {
   const [budget, setBudget] = useState(3300);
   const { data, error, loading, refetch } = useFetch<any>(() => api(`/api/marketing?budget=${budget}`), [budget]);
   if (loading && !data) return <Loading />; if (error) return <ErrorBox error={error} retry={refetch} />;
+  if (data.inactive) return (<div>
+    <PageHead title="Marketing Intelligence" question="What happened? Why?" desc="CAC is a spend/conversions proxy. ROAS is intentionally not shown — no attribution join exists, and attributed ≠ incremental." />
+    <div className="card p-6" role="status"><h3 className="font-bold">📭 Marketing is inactive for the active dataset</h3>
+      <p className="mut text-sm mt-1">{data.note}</p>
+      <p className="text-sm mt-2">Upload a file with marketing spend by channel/date on the Home upload card and this page will compute channel CAC, response curves and budget scenarios from it.</p></div></div>);
   const ch = data.channels, totSpend = ch.reduce((a: number, x: any) => a + x.spend, 0), totConv = ch.reduce((a: number, x: any) => a + x.conversions, 0);
   const best = [...ch].sort((a: any, b: any) => a.cac_proxy - b.cac_proxy)[0];
   const comp = Object.keys(data.optimizer.allocation || {}).map((c) => ({ channel: c, current: Math.round(data.optimizer.current_allocation[c]), optimized: Math.round(data.optimizer.allocation[c]) }));

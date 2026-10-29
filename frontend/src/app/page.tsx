@@ -130,6 +130,11 @@ function UploadPredict() {
     {names.length > 0 && <p className="text-[12.5px] mut mt-2">Selected: <b style={{ color: "var(--txt)" }}>{names.slice(0, 4).join(", ")}{names.length > 4 ? ` +${names.length - 4} more` : ""}</b> · limits: {batch?.limits || "max 25 files, 25 MB each"}</p>}
     {err && <p className="text-sm mt-2" role="alert" style={{ color: "var(--bad)" }}>⚠️ {err}</p>}
 
+    {batch?.activated && (<div className="card p-3.5 mt-3" style={{ borderColor: "var(--good)", background: "color-mix(in srgb, var(--good) 8%, var(--panel))" }} role="status">
+      <b style={{ color: "var(--good)" }}>✅ Your dataset is now LIVE across the whole app.</b>
+      <span className="text-sm"> Every page — Growth, Marketing, Customers, Pricing, Forecasting, Decisions, Reports and the Copilot — now computes on <b>{batch.activation?.dataset}</b>. {batch.activation?.recommendations_seeded ? `${batch.activation.recommendations_seeded} recommendations from your data were added to Decision Intelligence. ` : ""}Demo decisions history was preserved. Restore the demo anytime in Data Sources or Settings.</span>
+      <div className="flex gap-2 mt-2 flex-wrap"><Link className="btn" href="/growth">Growth</Link><Link className="btn" href="/forecasting">Forecasting</Link><Link className="btn" href="/customers">Customers</Link><Link className="btn" href="/decisions">Decisions</Link></div></div>)}
+    {batch?.activation_error && <p className="text-sm mt-2" style={{ color: "var(--warn)" }}>⚠️ {batch.activation_error} The analysis above is still valid.</p>}
     {batch && (<div className="mt-4">
       <h4 className="font-bold text-sm mb-2">🗂️ Dataset inventory — {batch.files_expanded} file(s) from {batch.files_received} upload(s)</h4>
       <div style={{ overflowX: "auto" }}><table><thead><tr><th>File</th><th>Format</th><th>Rows × Cols</th><th>Detected type</th><th>Status</th></tr></thead>
@@ -232,10 +237,17 @@ export default function Home() {
     window.addEventListener("cx-days", h); return () => window.removeEventListener("cx-days", h);
   }, []);
   const q = `/api/dashboard?days=${days}&metric=${metric}&gran=${gran}&breakdown=${breakdown}&cats=${cats.join(",")}&regs=${REGS.join(",")}&chans=${CHANS.join(",")}`;
-  const { data, error, loading, refetch } = useFetch<any>(() => api(q), [q]);
+  const { data: data0, error, loading, refetch } = useFetch<any>(() => api(q), [q]);
   const dec = useFetch<any>(() => api("/api/decisions"), []);
-  const fc = useFetch<any>(() => api("/api/forecast?category=Electronics"), []);
   const cust = useFetch<any>(() => api("/api/customers"), []);
+  const data: any = data0;
+  useEffect(() => {
+    const names = data?.categories?.map((c: any) => c.name);
+    if (names?.length && !cats.some((c) => names.includes(c))) setCats(names);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.categories]);
+  const fcCat = data?.categories?.[0]?.name || "Electronics";
+  const fc = useFetch<any>(() => api(`/api/forecast?category=${encodeURIComponent(fcCat)}`), [fcCat]);
   const [hidden, setHidden] = useState<string[]>([]);
   const askCopilot = (qtext: string) => window.dispatchEvent(new CustomEvent("cx-ask-copilot", { detail: qtext }));
 
@@ -269,7 +281,7 @@ export default function Home() {
           <h1 className="text-[27px] font-extrabold tracking-tight">{GREET}, welcome to <span style={{ background: "linear-gradient(90deg,var(--a),var(--a2))", WebkitBackgroundClip: "text", color: "transparent" }}>CORTEXORA</span></h1>
           <p className="mut text-sm mt-1">Your business intelligence, predictions, and decisions — all in one place.</p>
           <div className="flex flex-wrap items-center gap-2 mt-2.5 text-[12px]">
-            <span className="chip on" style={{ cursor: "default" }}>Demo dataset · synthetic (seed=42)</span>
+            <span className="chip on" style={{ cursor: "default" }}>{(data as any)?.mode === "uploaded" ? "📂 Your uploaded dataset — LIVE everywhere" : "Demo dataset · synthetic (seed=42)"}</span>
             <span className="chip" style={{ cursor: "default" }}>Period: {periodLabel}</span>
             <span className="chip" style={{ cursor: "default" }}>Data through {ins?.data_through ?? "…"}</span>
             <span className="chip" style={{ cursor: "default" }}><span className="status-dot pulse" style={{ background: "var(--good)", display: "inline-block", marginRight: 5 }} />Computed live by the analytics API</span>
@@ -293,7 +305,7 @@ export default function Home() {
       <span className="lab">Split</span>
       <select value={breakdown} onChange={(e) => setBreakdown(e.target.value)}>{["Total", "Category", "Region", "Channel"].map((m) => <option key={m}>{m}</option>)}</select>
       <span className="lab ml-3">Categories</span>
-      {CATS.map((c) => <button key={c} className={`chip ${cats.includes(c) ? "on" : ""}`} onClick={() => setCats(cats.includes(c) ? cats.filter((x) => x !== c) : [...cats, c])}>{c}</button>)}
+      {((data as any)?.categories?.map((c: any) => c.name) || CATS).map((c: string) => <button key={c} className={`chip ${cats.includes(c) ? "on" : ""}`} onClick={() => setCats(cats.includes(c) ? cats.filter((x) => x !== c) : [...cats, c])}>{c}</button>)}
     </div>
 
     <UploadPredict />
@@ -304,7 +316,7 @@ export default function Home() {
       <KpiCard label="Profit Margin" value={(k.margin * 100).toFixed(1) + "%"} sub="profit / revenue in scope" href="/pricing" title="Margin on the current scope. Click to open Pricing & Profitability." />
       <KpiCard label="Total Orders" value={k.orders.toLocaleString()} delta={k.orders_delta} spark={sparkMain} sub={`${k.customers} customers in scope`} href="/growth" title="Completed orders in scope. Click to open Business Growth." />
       <KpiCard label="Customer Churn Rate" value={churnRate === null ? "…" : (churnRate * 100).toFixed(1) + "%"} invert sub={sum ? `${sum.churned_heuristic} of ${sum.customers} customers inactive >180d (heuristic)` : "loading…"} href="/customers" title="Share of customers inactive for more than 180 days — a heuristic label; the validated churn model lives in Customer Intelligence." />
-      <KpiCard label="Forecasted Revenue (8w)" value={fc.data ? money(fc.data.forecast.reduce((a: number, x: any) => a + x.forecast, 0) * 190) : "…"} spark={sparkFc} sub="Electronics units forecast × avg price" href="/forecasting" title="Sum of the 8-week Electronics unit forecast × average selling price. Evidence and baseline comparison live in Demand Forecasting." />
+      <KpiCard label={`Forecasted Revenue (8w)`} value={fc.data ? money(fc.data.forecast.reduce((a: number, x: any) => a + x.forecast, 0) * (k.units ? k.revenue / k.units : 0)) : "…"} spark={sparkFc} sub={`${fcCat} units forecast × avg price`} href="/forecasting" title="Sum of the 8-week Electronics unit forecast × average selling price. Evidence and baseline comparison live in Demand Forecasting." />
     </div>
     <div className="grid gap-4 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
       <ChartCard title={`${metric} trend`} sub={`${gran}${breakdown !== "Total" ? " · by " + breakdown : ""} · solid = actuals (forecast lives in Demand Forecasting) · click legend to toggle a series`}>

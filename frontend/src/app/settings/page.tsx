@@ -34,7 +34,9 @@ export default function Settings() {
           <div>Analytics API (FastAPI): <b>{health ? (health.status === "ok" ? "✅ connected" : "⛔ " + health.status) : "checking…"}</b></div>
           <div>Data mode: <b>Demo Data</b> — synthetic dataset (seed=42){health?.records ? ` · ${health.records.toLocaleString()} records · through ${health.data_through}` : ""}</div>
           <div>CORTEXORA Copilot: <b>Deterministic demo mode</b> — data-grounded answers from validated analytics functions. No LLM API key is configured; when one is added server-side (env var, backend only), Copilot upgrades without any frontend change.</div>
-          <div>Warehouse: SQLite (demo) · schema is Postgres-portable · decisions & pipeline logs survive reloads.</div></div></ChartCard>
+          <div>Warehouse: SQLite · schema is Postgres-portable · decisions & pipeline logs survive reloads.</div>
+          <div>Active dataset: <b>{health?.dataset || "…"}</b> ({health?.mode || "…"}){health?.records ? ` · ${health.records.toLocaleString()} records · through ${health.data_through}` : ""}</div>
+          <button className="btn mt-2" onClick={async () => { await fetch("/api/dataset/reset", { method: "POST" }); setSaved("↺ Demo dataset restored — every page is back on synthetic data."); setHealth(await api("/api/health")); }}>↺ Reset to demo dataset</button></div></ChartCard>
       <ChartCard title="⌨️ Keyboard shortcuts" sub="Documented and typing-safe">
         <div className="text-sm space-y-1.5"><div><span className="kbd">Ctrl/⌘ K</span> Command palette — jump to any page or Copilot</div>
           <div><span className="kbd">Esc</span> Close palette / drawer</div>

@@ -10,8 +10,9 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import web.server as _ws
 from web.server import dashboard as _dashboard, chat as _chat, DF, ORDERS, ITEMS, PRODUCTS, INV, MKT
-from cortexora.config import DB_PATH
+from cortexora.config import DB_PATH, SAMPLE_DIR, ROOT
 from cortexora.analytics.metrics import kpis, period_compare, marketing_metrics
 from cortexora.decision_engine.engine import load_decisions, set_status, record_outcome, outcome_summary
 from cortexora.pipelines.etl import load_table
@@ -19,12 +20,50 @@ from cortexora.pipelines.etl import load_table
 app = FastAPI(title="CORTEXORA API", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], allow_methods=["*"], allow_headers=["*"])
 MODE = "demo-synthetic"
+# Active-dataset state: the whole API recomputes on whichever dataset is live.
+DATASET = {"name": "Demo dataset (synthetic, seed=42)", "mode": "demo-synthetic", "files": [], "activated_at": None}
+
+def _reload():
+    """Point every handler at the current warehouse contents."""
+    global DF, ORDERS, ITEMS, PRODUCTS, INV, MKT
+    _ws.reload_data()
+    DF, ORDERS, ITEMS, PRODUCTS, INV, MKT = _ws.DF, _ws.ORDERS, _ws.ITEMS, _ws.PRODUCTS, _ws.INV, _ws.MKT
+
+def _activate(frames: dict, files: list[str], intel_recs: list[dict] | None = None) -> dict:
+    """Replace the warehouse with uploaded frames (ETL quality-gated; decision
+    audit history preserved by the ETL), reload all handlers, and seed fresh
+    pending recommendations computed from the uploaded data."""
+    from cortexora.pipelines.etl import run as etl_run
+    dest = ROOT / "data" / "uploaded" / "current"; dest.mkdir(parents=True, exist_ok=True)
+    for tname, frame in frames.items(): frame.to_csv(dest / f"{tname}.csv", index=False)
+    etl_run(dest, DB_PATH)
+    _reload()
+    seeded = 0
+    if intel_recs:
+        from cortexora.decision_engine.engine import _rec, persist
+        recs = [_rec("Uploaded data", r["action"], r["action"], r["evidence"],
+                     max(float(r.get("expected_impact") or 0), 1.0), 0.6, 0.7) for r in intel_recs[:5]]
+        try: persist(recs, DB_PATH); seeded = len(recs)
+        except Exception: seeded = 0
+    DATASET.update(name="Uploaded dataset: " + ", ".join(files[:3]) + (f" +{len(files)-3} more" if len(files) > 3 else ""),
+                   mode="uploaded", files=files, activated_at=pd.Timestamp.now().isoformat())
+    return {"dataset": DATASET["name"], "mode": "uploaded", "recommendations_seeded": seeded}
+
+@app.post("/api/dataset/reset")
+def dataset_reset():
+    """Restore the synthetic demo warehouse and point every handler back at it."""
+    from cortexora.pipelines.etl import run as etl_run
+    etl_run(SAMPLE_DIR, DB_PATH)
+    _reload()
+    DATASET.update(name="Demo dataset (synthetic, seed=42)", mode="demo-synthetic", files=[], activated_at=None)
+    return {"ok": True, "dataset": DATASET["name"], "mode": "demo-synthetic"}
 
 def rec(df, n=200):
     return json.loads(df.head(n).to_json(orient="records"))
 
 @app.get("/api/health")
-def health(): return {"status": "ok", "mode": MODE, "records": int(len(DF)), "data_through": str(DF.order_date.max().date())}
+def health(): return {"status": "ok", "mode": DATASET["mode"], "dataset": DATASET["name"],
+                      "records": int(len(DF)), "data_through": str(DF.order_date.max().date())}
 
 @app.get("/api/dashboard")
 def dashboard(days: int = 10000, metric: str = "Revenue", gran: str = "Weekly", breakdown: str = "Total",
@@ -33,7 +72,7 @@ def dashboard(days: int = 10000, metric: str = "Revenue", gran: str = "Weekly", 
     if cats: q["cats"] = [cats]
     if regs: q["regs"] = [regs]
     if chans: q["chans"] = [chans]
-    out = _dashboard(q); out["mode"] = MODE; return out
+    out = _dashboard(q); out["mode"] = DATASET["mode"]; out["dataset"] = DATASET["name"]; return out
 
 @app.get("/api/growth")
 def growth():
@@ -41,7 +80,7 @@ def growth():
     by_cat["margin"] = by_cat.profit / by_cat.revenue
     by_reg = DF.groupby("region").agg(revenue=("revenue", "sum"), profit=("profit", "sum")).reset_index()
     by_reg["margin"] = by_reg.profit / by_reg.revenue
-    return {"mode": MODE, "kpis": kpis(DF), "period_compare": rec(period_compare(DF), 20),
+    return {"mode": DATASET["mode"], "kpis": kpis(DF), "period_compare": rec(period_compare(DF), 20),
             "by_category": rec(by_cat), "by_region": rec(by_reg),
             "products": dashboard()["products"]}
 
@@ -54,7 +93,7 @@ def forecast(category: str = "Electronics", horizon: int = 8):
     stock = INV.merge(PRODUCTS[["product_id", "category", "unit_cost", "list_price"]], on="product_id").merge(stats, on="product_id", how="left").fillna(0)
     plan = reorder_plan(stock)
     hist = s.tail(52)
-    return {"mode": MODE, "category": category, "categories": sorted(PRODUCTS.category.unique()),
+    return {"mode": DATASET["mode"], "category": category, "categories": sorted(PRODUCTS.category.unique()),
             "evaluation": ev, "forecast": [{"week": str(w.date()), "forecast": float(r.forecast), "lower": float(r.lower), "upper": float(r.upper)} for w, r in zip(fc.week, fc.itertuples())],
             "history": [{"week": str(w.date()), "actual": float(v)} for w, v in hist.items()],
             "reorder_plan": rec(plan[["product_id", "category", "stock_on_hand", "forecast_daily", "lead_time_days", "recommended_reorder_qty", "estimated_order_cost", "stockout_risk"]], 50)}
@@ -64,18 +103,23 @@ def customers():
     from cortexora.models.forecasting import rfm
     r = rfm(ORDERS, ITEMS)
     art = Path("cortexora/models/artifacts/churn_evaluation.json")
-    return {"mode": MODE, "summary": {"customers": int(len(r)), "active": int((r.segment.astype(str) == "Active").sum()),
+    return {"mode": DATASET["mode"], "summary": {"customers": int(len(r)), "active": int((r.segment.astype(str) == "Active").sum()),
             "at_risk": int((r.segment.astype(str) == "At risk").sum()), "churned_heuristic": int(r.segment.astype(str).str.startswith("Churned").sum()),
             "repeat_rate": float((r.frequency > 1).mean()), "avg_clv": float(r.clv_simple.mean())},
             "segments": rec(r.segment.astype(str).value_counts().rename_axis("segment").reset_index(name="customers"), 10),
             "customers_table": rec(r.sort_values("monetary", ascending=False), 500),
-            "churn_model": json.loads(art.read_text()) if art.exists() else None}
+            "churn_model": (json.loads(art.read_text()) if art.exists() else None) if DATASET["mode"] == "demo-synthetic" else None,
+            "churn_model_note": None if DATASET["mode"] == "demo-synthetic" else "The churn model artifact was trained on the demo dataset and does not describe the uploaded data; RFM segments above are computed live from the active dataset."}
 
 @app.get("/api/marketing")
 def marketing(budget: float = 3300):
     from cortexora.optimization.optimize import optimize_budget
+    if MKT is None or len(MKT) == 0:
+        return {"mode": DATASET["mode"], "inactive": True,
+                "note": "The active dataset has no marketing spend rows, so campaign performance and budget optimisation are inactive — upload spend by channel/date to enable them. Nothing is simulated in its place.",
+                "channels": [], "optimizer": {}, "curves": []}
     mm = marketing_metrics(MKT); opt = optimize_budget(MKT, total_budget=budget)
-    return {"mode": MODE, "channels": rec(mm), "optimizer": {k: v for k, v in opt.items() if k != "curves"},
+    return {"mode": DATASET["mode"], "channels": rec(mm), "optimizer": {k: v for k, v in opt.items() if k != "curves"},
             "curves": rec(opt["curves"]) if "curves" in opt else []}
 
 @app.get("/api/pricing")
@@ -85,7 +129,7 @@ def pricing(product: str = "", change: float = 10, elasticity: float = -1.2):
     sold = ITEMS[ITEMS.product_id == p.product_id]
     base_q, base_rev = float(sold.qty.sum()), float((sold.qty * sold.unit_price * (1 - sold.discount)).sum())
     new_rev = base_q * (1 + elasticity * change / 100) * float(p.list_price) * (1 + change / 100)
-    return {"mode": MODE, "products": list(PRODUCTS.product_name), "product": {"name": str(p.product_name), "list_price": float(p.list_price), "unit_cost": float(p.unit_cost)},
+    return {"mode": DATASET["mode"], "products": list(PRODUCTS.product_name), "product": {"name": str(p.product_name), "list_price": float(p.list_price), "unit_cost": float(p.unit_cost)},
             "scenario": {"change_pct": change, "elasticity": elasticity, "observed_revenue": base_rev, "scenario_revenue": float(new_rev), "delta_pct": float(new_rev / base_rev - 1) * 100 if base_rev else 0,
                          "label": "Assumption-based scenario — elasticity is a user input, not an estimated causal effect."},
             "breakeven_units_at_10000_fixed": breakeven_units(10000, float(p.list_price), float(p.unit_cost)),
@@ -95,20 +139,20 @@ def pricing(product: str = "", change: float = 10, elasticity: float = -1.2):
 def mmm():
     from cortexora.analytics.experiments import mmm_readiness
     g = mmm_readiness(MKT, has_revenue_outcome=False)
-    return {"mode": MODE, "fitted": False, "readiness": rec(g),
+    return {"mode": DATASET["mode"], "fitted": False, "readiness": rec(g),
             "note": "MMM fitting stays disabled until a revenue outcome joinable to weekly channel spend and external controls exist."}
 
 @app.get("/api/experiments")
 def experiments():
     from cortexora.analytics.experiments import ab_conversion, required_sample_size, srm_check
-    return {"mode": MODE,
+    return {"mode": DATASET["mode"],
             "example_observed": ab_conversion(1200, 156, 1200, 132) | {"name": "Demo A/B example (labelled synthetic counts)", "srm": srm_check(1200, 1200)},
             "planning": {"baseline": 0.11, "mde_abs": 0.02, "per_group_n": required_sample_size(0.11, 0.02)}}
 
 @app.get("/api/decisions")
 def decisions():
     dec = load_decisions(DB_PATH)
-    return {"mode": MODE, "decisions": rec(dec, 200) if len(dec) else [], "outcome_summary": {k: v for k, v in outcome_summary(dec).items() if k not in ("detail", "by_area")}}
+    return {"mode": DATASET["mode"], "decisions": rec(dec, 200) if len(dec) else [], "outcome_summary": {k: v for k, v in outcome_summary(dec).items() if k not in ("detail", "by_area")}}
 
 class StatusIn(BaseModel):
     status: str; owner: str = ""
@@ -137,7 +181,7 @@ def health_data():
     mid, end = DF.order_date.min() + pd.Timedelta(days=540), DF.order_date.max()
     try: runs = rec(load_table("pipeline_runs").sort_values("run_id", ascending=False), 20)
     except Exception: runs = []
-    return {"mode": MODE, "quality": rec(run_all(frames), 50), "quality_fails": int((run_all(frames).status == "FAIL").sum()),
+    return {"mode": DATASET["mode"], "quality": rec(run_all(frames), 50), "quality_fails": int((run_all(frames).status == "FAIL").sum()),
             "drift": rec(drift_report(DF[DF.order_date <= mid], DF[DF.order_date > end - pd.Timedelta(days=180)], ["qty", "unit_price", "discount", "revenue"])),
             "pipeline_runs": runs}
 
@@ -148,7 +192,7 @@ def datasources():
         try:
             d = load_table(t); out.append({"table": t, "rows": int(len(d)), "columns": list(d.columns)})
         except Exception as e: out.append({"table": t, "rows": 0, "columns": [], "error": str(e)})
-    return {"mode": MODE, "sources": out, "warehouse": str(DB_PATH)}
+    return {"mode": DATASET["mode"], "sources": out, "warehouse": str(DB_PATH)}
 
 @app.post("/api/upload/analyse")
 async def upload_analyse(file: UploadFile = File(...), cost_ratio: float = 0.55):
@@ -204,7 +248,7 @@ async def upload_analyse(file: UploadFile = File(...), cost_ratio: float = 0.55)
             dcol = detected["order_date"]["column"]
             dates, _ = parse_dates(raw[dcol])
             ts_note = f"Date column detected ({dcol}): {int(dates.notna().sum())} parseable dates from {str(dates.min())[:10]} to {str(dates.max())[:10]}. Add a sales value column (price or total) to unlock trend + forecast."
-        return {"kind": "generic", "mode": MODE, "verification": verification,
+        return {"kind": "generic", "mode": DATASET["mode"], "verification": verification,
                 "numeric_summary": numeric, "categorical_summary": categorical,
                 "correlations": correlations[:8], "timeseries_note": ts_note,
                 "note": "This file was verified and profiled, but no date + sales-value pair was detected, so sales KPIs and forecasting were not run. Rename columns or add a date and price/total column — detection also reads column contents, not just names."}
@@ -259,7 +303,7 @@ async def upload_analyse(file: UploadFile = File(...), cost_ratio: float = 0.55)
     if report.get("price_is_derived"): warnings.append("Unit price derived from the line-total column ÷ quantity.")
     if report.get("product_is_fallback"): warnings.append("No product column detected — everything analysed as one combined series.")
     if report.get("date_note") and "assumed" in str(report["date_note"]): warnings.append(f"Dates: {report['date_note']}.")
-    return {"kind": "sales", "mode": MODE, "report": report, "kpis": kpis(d), "trend": trend,
+    return {"kind": "sales", "mode": DATASET["mode"], "report": report, "kpis": kpis(d), "trend": trend,
             "top_products": by_product, "forecast": forecast_block, "verification": verification,
             "warnings": warnings,
             "by_category": rec(d.groupby("category").agg(revenue=("revenue", "sum"), profit=("profit", "sum")).reset_index()),
@@ -273,18 +317,36 @@ async def upload_multi(files: list[UploadFile] = File(...), cost_ratio: float = 
     from cortexora.pipelines.multi import analyse_batch
     payload = [(f.filename or "upload", await f.read()) for f in files]
     try:
-        return {"mode": MODE, **analyse_batch(payload, cost_ratio)}
+        result = analyse_batch(payload, cost_ratio)
     except ValueError as e:
         raise HTTPException(422, str(e))
+    frames = result.pop("_frames", None)  # DataFrames — never serialised
+    result["mode"] = DATASET["mode"]
+    result["activated"] = False
+    if frames is not None and result.get("combined"):
+        sales_names = [e["file"] for e in result["per_file"]
+                       if e.get("status") == "ok" and (e.get("result") or {}).get("kind") == "sales"]
+        intel_recs = (result["combined"].get("intelligence") or {}).get("recommendations") or []
+        try:
+            result["activation"] = _activate(frames, sales_names, intel_recs)
+            result["activated"] = True
+            result["mode"] = "uploaded"
+        except Exception as e:
+            result["activation_error"] = f"Analysis succeeded but warehouse activation failed the quality gate: {e}"
+    return result
 
 @app.get("/api/reports/executive")
 def executive_report():
     from cortexora.reports.report import generate_markdown_report
     from cortexora.models.forecasting import weekly_series, evaluate
     art = Path("cortexora/models/artifacts/churn_evaluation.json")
-    md = generate_markdown_report(DF, evaluate(weekly_series(DF, "Electronics", PRODUCTS)),
-                                  json.loads(art.read_text()) if art.exists() else None, load_decisions(DB_PATH), "Next.js UI export")
-    return {"mode": MODE, "markdown": md}
+    cat = sorted(PRODUCTS.category.unique())[0] if len(PRODUCTS) else "Electronics"
+    try: ev = evaluate(weekly_series(DF, cat, PRODUCTS))
+    except Exception: ev = None
+    md = generate_markdown_report(DF, ev,
+                                  json.loads(art.read_text()) if art.exists() and DATASET["mode"] == "demo-synthetic" else None,
+                                  load_decisions(DB_PATH), f"{DATASET['name']} · Next.js UI export")
+    return {"mode": DATASET["mode"], "dataset": DATASET["name"], "markdown": md}
 
 class ChatIn(BaseModel):
     question: str; page: object = ""
@@ -292,6 +354,10 @@ class ChatIn(BaseModel):
 @app.post("/api/chat")
 def chat(body: ChatIn):
     out = _chat(body.question)
+    if DATASET["mode"] == "uploaded" and isinstance(out.get("text"), str):
+        out["text"] = (out["text"].replace("synthetic demo data, seed=42", "your uploaded dataset")
+                                  .replace("all data in scope, synthetic demo", "all data in scope, your uploaded dataset")
+                                  .replace("It is **synthetic demo data**", "It is **your uploaded dataset**"))
     out["mode"] = "demo-assistant (deterministic, data-grounded — no LLM API configured)"
     out["page_context"] = body.page
     return out
