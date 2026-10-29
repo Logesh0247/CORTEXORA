@@ -60,10 +60,28 @@ elif page == "Pricing Simulator":
     st.metric("Scenario revenue", f"${new_rev:,.0f}", f"{new_rev/base_rev-1:+.1%} vs observed ${base_rev:,.0f} (observed 24-mo total)")
 
 elif page == "Customer Intelligence":
-    st.title("Customer Intelligence (RFM)")
-    st.caption("Segments are recency heuristics, not a validated churn model — see Roadmap Phase 4.")
+    st.title("Customer Intelligence (RFM + Churn Model)")
     r = rfm(orders, items); st.plotly_chart(px.histogram(r, x="segment", color="segment"), use_container_width=True)
     st.dataframe(r.sort_values("monetary", ascending=False).head(100), use_container_width=True)
+    st.subheader("Churn prediction — validated model (Phase 4)")
+    st.caption("Label: no purchase in the 90 days after cutoff (proxy — retail has no cancellation event). "
+               "Trained on synthetic demo data: metrics validate the pipeline, not real-world performance. See docs/06_MODEL_CARD_CHURN.md.")
+    from cortexora.models.churn import build_dataset, train_and_evaluate, predict_risk
+    @st.cache_resource
+    def _train():
+        cutoff = pd.to_datetime(orders.order_date).max() - pd.Timedelta(days=90)
+        data = build_dataset(orders, items, cutoff)
+        return train_and_evaluate(data), data
+    try:
+        result, data = _train(); rep = result["report"]
+        st.write(f"Best model: **{rep['best_model']}** · {rep['n_customers']} customers · observed churn rate {rep['churn_rate']:.1%} · hold-out n={rep['test_size']}")
+        st.dataframe(pd.DataFrame(rep["results"]).T, use_container_width=True)
+        st.bar_chart(pd.Series(rep["feature_importance"], name="importance (model explanation, not causal)"))
+        risk = predict_risk(result["model"], data)
+        st.subheader("Highest-risk customers"); st.dataframe(risk.head(50), use_container_width=True)
+        st.download_button("Download risk list CSV", risk.to_csv(index=False), "churn_risk.csv")
+    except ValueError as e:
+        st.error(str(e))
 
 elif page == "Marketing Performance":
     st.title("Marketing Performance"); st.caption("CAC is a spend/conversions proxy. ROAS is not shown: no attribution join exists in this data — attributed ≠ incremental.")

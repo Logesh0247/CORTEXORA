@@ -4,3 +4,4 @@ __pycache__/
 .env
 data/processed/*.db
 .pytest_cache/
+cortexora/models/artifacts/*.joblib

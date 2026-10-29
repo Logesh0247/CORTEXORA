@@ -14,11 +14,16 @@ def generate(out: Path, seed: int = 42, months: int = 24) -> dict[str, pd.DataFr
     customers = pd.DataFrame(dict(customer_id=range(1, 501), segment=rng.choice(["Consumer","SMB","Enterprise"], 500, p=[.6,.3,.1]),
                                   region=rng.choice(["North","South","East","West"], 500), signup_date="2022-01-01"))
     dates = pd.date_range("2023-01-01", periods=months*30, freq="D")
+    # Customer lifecycle: ~35% of customers stop ordering after a random lifetime
+    # (this is what creates genuine churn / at-risk patterns for Phase 4 modelling).
+    lifetimes = np.where(rng.random(500) < 0.35, rng.integers(90, 660, 500), 10_000)
+    cust_ids = customers.customer_id.to_numpy()
     rows_o, rows_i, oid = [], [], 0
-    for d in dates:
+    for day_idx, d in enumerate(dates):
+        eligible = cust_ids[lifetimes > day_idx]
         seasonal = 1 + 0.3*np.sin(2*np.pi*d.dayofyear/365) + (0.25 if d.month == 12 else 0)
         for _ in range(max(1, int(rng.poisson(28*seasonal)))):
-            oid += 1; cust = customers.sample(1, random_state=int(rng.integers(1e9))).iloc[0]
+            oid += 1; cust = customers.loc[customers.customer_id == int(rng.choice(eligible))].iloc[0]
             rows_o.append(dict(order_id=oid, customer_id=int(cust.customer_id), order_date=d.date().isoformat(), region=cust.region, channel=rng.choice(["Online","Store","Marketplace"], p=[.55,.3,.15])))
             for p in products.sample(int(rng.integers(1,4)), random_state=int(rng.integers(1e9))).itertuples():
                 rows_i.append(dict(order_id=oid, product_id=p.product_id, qty=int(rng.integers(1,5)), unit_price=p.list_price, discount=float(rng.choice([0,.05,.1,.2], p=[.6,.2,.15,.05])), unit_cost=p.unit_cost))

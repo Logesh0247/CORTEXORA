@@ -1,0 +1,54 @@
+{
+  "n_customers": 500,
+  "churn_rate": 0.348,
+  "test_size": 150,
+  "best_model": "logistic_regression",
+  "results": {
+    "baseline_majority": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "roc_auc": 0.5,
+      "pr_auc": 0.3466666666666667
+    },
+    "logistic_regression": {
+      "precision": 0.9387755102040817,
+      "recall": 0.8846153846153846,
+      "f1": 0.9108910891089109,
+      "roc_auc": 0.9768445839874411,
+      "pr_auc": 0.9716996195260186
+    },
+    "random_forest": {
+      "precision": 0.9795918367346939,
+      "recall": 0.9230769230769231,
+      "f1": 0.9504950495049505,
+      "roc_auc": 0.9572213500784928,
+      "pr_auc": 0.9645021575872064
+    }
+  },
+  "feature_importance": {
+    "recency_days": 1.7905950425719628,
+    "active_span_days": 1.7631773777748398,
+    "orders_last_90d": 1.0139824237118422,
+    "monetary": 0.520200911202687,
+    "frequency": 0.5143620352437572,
+    "orders_last_30d": 0.46330745299561077,
+    "tenure_days": 0.27553924128713003,
+    "avg_items_per_order": 0.19351791745123728,
+    "avg_discount": 0.17833679406968445,
+    "avg_order_value": 0.15588393619162283
+  },
+  "features": [
+    "recency_days",
+    "frequency",
+    "monetary",
+    "avg_order_value",
+    "avg_items_per_order",
+    "avg_discount",
+    "active_span_days",
+    "orders_last_30d",
+    "orders_last_90d",
+    "tenure_days"
+  ],
+  "seed": 42
+}
