@@ -50,5 +50,10 @@
     "orders_last_90d",
     "tenure_days"
   ],
-  "seed": 42
+  "seed": 42,
+  "model_version": "churn-v1",
+  "trained_at": "2026-10-29T07:22:49",
+  "data_cutoff": "2024-09-21",
+  "label": "no purchase within 90d after cutoff",
+  "training_data": "synthetic demo (seed=42) \u2014 retrain on real data before business use"
 }

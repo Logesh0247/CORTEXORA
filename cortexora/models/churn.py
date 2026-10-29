@@ -140,3 +140,13 @@ def save_artifacts(result: dict, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(result["model"], out_dir / "churn_model.joblib")
     (out_dir / "churn_evaluation.json").write_text(json.dumps(result["report"], indent=2))
+
+MODEL_VERSION = "churn-v1"
+
+def evaluate_on(model, data: pd.DataFrame) -> dict:
+    """Score a fitted model on a (later, labelled) dataset — Phase 8 monitoring."""
+    prob = model.predict_proba(data[FEATURES])[:, 1]
+    out = _metrics(data["churn"].astype(int), model.predict(data[FEATURES]), prob)
+    out["mean_predicted_probability"] = float(prob.mean())
+    out["observed_churn_rate"] = float(data["churn"].mean())
+    return out

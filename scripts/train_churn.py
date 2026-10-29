@@ -12,6 +12,10 @@ if __name__ == "__main__":
     cutoff = orders.order_date.max() - pd.Timedelta(days=90)  # label window needs 90d of future
     data = build_dataset(orders, items, cutoff)
     result = train_and_evaluate(data)
+    import datetime
+    result["report"].update(model_version="churn-v1", trained_at=datetime.datetime.now().isoformat(timespec="seconds"),
+                            data_cutoff=str(cutoff.date()), label="no purchase within 90d after cutoff",
+                            training_data="synthetic demo (seed=42) — retrain on real data before business use")
     out = Path("cortexora/models/artifacts"); save_artifacts(result, out)
     r = result["report"]
     print(f"customers={r['n_customers']} churn_rate={r['churn_rate']:.2%} best={r['best_model']}")

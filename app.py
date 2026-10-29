@@ -222,7 +222,45 @@ elif page == "Decision Intelligence Engine":
 
 elif page == "Data Quality & Monitoring":
     st.title("Data Quality & Model Monitoring")
+    st.caption("Three different things, never conflated: data drift ≠ prediction drift ≠ measured performance degradation. Only the last — computed on later *labelled* data — is evidence about accuracy.")
     from cortexora.monitoring.quality import run_all
+    from cortexora.monitoring.drift import drift_report, performance_comparison
+    st.subheader("Pipeline runs (logged by the ETL)")
+    try:
+        runs = load_table("pipeline_runs").sort_values("run_id", ascending=False)
+        st.dataframe(runs.head(10), use_container_width=True)
+        last_ok = runs[runs.status=="success"].finished_at.max()
+        st.write(f"Last successful run: **{last_ok}** · Data current to **{orders.order_date.max()}** (end of the synthetic dataset — 'freshness' here means pipeline recency, not real-world recency).")
+    except Exception: st.info("No pipeline runs logged yet — run `python scripts/run_etl.py`.")
+    st.subheader("Data quality checks")
     frames = {t: load_table(t) for t in ["orders","order_items","customers","products"]}
-    st.dataframe(run_all(frames), use_container_width=True)
-    st.info("Forecast monitoring: re-run Demand Forecasting after new data lands and compare WAPE vs the seasonal-naive baseline. Drift ≠ degradation — see docs/03.")
+    q = run_all(frames); st.dataframe(q, use_container_width=True)
+    if (q.status=="FAIL").any(): st.error("FAIL checks present — analytical outputs should not be trusted until resolved.")
+    st.subheader("Data drift — first 18 months (reference) vs last 6 months (current)")
+    mid, end = df.order_date.min() + pd.Timedelta(days=540), df.order_date.max()
+    ref, cur = df[df.order_date <= mid], df[df.order_date > end - pd.Timedelta(days=180)]
+    st.dataframe(drift_report(ref, cur, ["qty","unit_price","discount","revenue"]), use_container_width=True)
+    st.caption("PSI <0.10 stable · 0.10–0.25 moderate shift · >0.25 significant shift. A shift is a prompt to investigate, not proof the model broke.")
+    st.subheader("Churn model — temporal performance monitoring")
+    st.caption("Train on an earlier cohort, score a later labelled cohort. This is the only honest way to detect degradation before it hurts.")
+    from cortexora.models.churn import build_dataset, train_and_evaluate, evaluate_on, FEATURES as CHURN_FEATURES
+    @st.cache_resource
+    def _monitor():
+        maxd = pd.to_datetime(orders.order_date).max()
+        ref_data = build_dataset(orders, items, maxd - pd.Timedelta(days=270))
+        cur_data = build_dataset(orders, items, maxd - pd.Timedelta(days=90))
+        trained = train_and_evaluate(ref_data); model = trained["model"]
+        return trained["report"], evaluate_on(model, cur_data), cur_data
+    try:
+        ref_rep, cur_metrics, cur_data = _monitor()
+        ref_metrics = ref_rep["results"][ref_rep["best_model"]]
+        comp = performance_comparison(ref_metrics, cur_metrics)
+        c = st.columns(3); c[0].metric("Reference PR-AUC (hold-out)", f"{comp['reference']:.3f}"); c[1].metric("Later-period PR-AUC", f"{comp['current']:.3f}", f"{comp['delta']:+.3f}"); c[2].metric("Degraded?", "YES — investigate" if comp["degraded"] else "No")
+        st.write(comp["note"])
+        st.write(f"Later cohort: {len(cur_data)} customers · observed churn {cur_metrics['observed_churn_rate']:.1%} vs mean predicted {cur_metrics['mean_predicted_probability']:.1%} (calibration gap is itself a monitoring signal).")
+        st.dataframe(pd.DataFrame({"reference_holdout": ref_metrics, "later_period": {k: cur_metrics[k] for k in ref_metrics}}), use_container_width=True)
+        import json, pathlib
+        art = pathlib.Path("cortexora/models/artifacts/churn_evaluation.json")
+        if art.exists():
+            meta = json.loads(art.read_text()); st.caption(f"Registered artifact: {meta.get('model_version','?')} · trained {meta.get('trained_at','?')} · data cutoff {meta.get('data_cutoff','?')} · {meta.get('training_data','')}")
+    except ValueError as e: st.error(str(e))
