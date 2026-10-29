@@ -191,51 +191,108 @@ st.markdown(f"""<div class="cx-hero"><div class="brand">{PAGE_ICON.get(page,'')}
 
 if page == "Home / Executive Overview":
     page_intro()
-    st.caption("Every number below is computed live from the warehouse for the current filters. Use the tabs to explore, then jump into the module behind any number.")
-    k = kpis(f); pc0 = period_compare(f).set_index("metric")
-    def _delta(metric):
-        v = pc0.loc[metric, "change_pct"]; cls = "up" if v >= 0 else "down"; arrow = "▲" if v >= 0 else "▼"
-        return f"<span class='{cls}'>{arrow} {abs(v):.1f}%</span> vs prior 30d"
-    cards = [("Revenue", f"${k['revenue']:,.0f}", _delta("revenue")), ("Profit", f"${k['profit']:,.0f}", _delta("profit")),
-             ("Margin", f"{k['margin']:.1%}", "profit / revenue"), ("Orders", f"{k['orders']:,}", _delta("orders")),
-             ("Avg order value", f"${k['aov']:,.2f}", _delta("aov"))]
-    c = st.columns(5)
-    for col, (label, val, sub) in zip(c, cards):
-        col.markdown(f"<div class='cx-kpi'><div class='label'>{label}</div><div class='value'>{val}</div><div class='sub'>{sub}</div></div>", unsafe_allow_html=True)
-    s = st.columns(4)
-    s[0].button("📈 Why did this move? → Growth", use_container_width=True, on_click=go, args=("Business Growth",))
-    s[1].button("🔮 What happens next? → Forecast", use_container_width=True, on_click=go, args=("Demand Forecasting",))
-    s[2].button("🧠 What should we do? → Decisions", use_container_width=True, type="primary", on_click=go, args=("Decision Intelligence Engine",))
-    s[3].button("🩺 Can we trust this? → Monitoring", use_container_width=True, on_click=go, args=("Data Quality & Monitoring",))
-    # Insight cards computed from the filtered data
-    if len(f):
-        by_cat = f.groupby("category").revenue.sum(); top_cat = by_cat.idxmax()
-        by_reg = f.groupby("region").revenue.sum(); top_reg = by_reg.idxmax()
-        low_margin = f.groupby("category").apply(lambda g: g.profit.sum()/g.revenue.sum() if g.revenue.sum() else 0).idxmin()
+    st.markdown("### 🎛️ Interactive Dashboard — change any control and **everything below recalculates instantly**")
+    # ---------- Control deck ----------
+    with st.container(border=True):
+        c1, c2, c3, c4 = st.columns([2.2, 1.2, 1.2, 1.2])
+        _dmin, _dmax = df.order_date.min().date(), df.order_date.max().date()
+        date_range = c1.slider("📅 Date range", _dmin, _dmax, (_dmin, _dmax), key="dash_dates")
+        metric_label = c2.selectbox("📐 Metric", ["Revenue", "Profit", "Units", "Orders"], key="dash_metric")
+        gran = c3.selectbox("⏱️ Granularity", ["Weekly", "Daily", "Monthly"], key="dash_gran")
+        chart_type = c4.selectbox("📊 Chart type", ["Area", "Line", "Bar"], key="dash_chart")
+        c5, c6, c7, c8 = st.columns([1.4, 1.4, 1.4, 1])
+        breakdown = c5.selectbox("🧩 Break trend down by", ["Total", "Category", "Region", "Channel"], key="dash_break")
+        dash_cats = c6.multiselect("Category", sorted(df.category.unique()), default=cats, key="dash_cats")
+        dash_chans = c7.multiselect("Channel", sorted(df.channel.unique()), default=sorted(df.channel.unique()), key="dash_chans")
+        top_n = c8.slider("🏆 Leaderboard rows", 5, 20, 10, key="dash_topn")
+    metric_col = {"Revenue": "revenue", "Profit": "profit", "Units": "qty", "Orders": "revenue"}[metric_label]
+    d = df[df.category.isin(dash_cats) & df.region.isin(regions) & df.channel.isin(dash_chans)
+           & df.order_date.between(pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1]))]
+    if d.empty:
+        st.warning("No data for this combination — widen the date range or re-select categories/channels above.")
+    # ---------- KPI strip (recomputed from d, delta vs equal-length prior period) ----------
+    k = kpis(d) if len(d) else dict(revenue=0, profit=0, margin=0, orders=0, aov=0, units=0, customers=0)
+    span_days = max((pd.Timestamp(date_range[1]) - pd.Timestamp(date_range[0])).days, 1)
+    prior = df[df.category.isin(dash_cats) & df.region.isin(regions) & df.channel.isin(dash_chans)
+               & df.order_date.between(pd.Timestamp(date_range[0]) - pd.Timedelta(days=span_days), pd.Timestamp(date_range[0]) - pd.Timedelta(days=1))]
+    kp = kpis(prior) if len(prior) else dict(revenue=0, profit=0, orders=0, aov=0)
+    def _d(cur, prev): return delta_html((cur / prev - 1) * 100 if prev else 0, f"vs prior {span_days}d")
+    kpi_cards([("Revenue", f"${k['revenue']:,.0f}", _d(k['revenue'], kp['revenue'])),
+               ("Profit", f"${k['profit']:,.0f}", _d(k['profit'], kp['profit'])),
+               ("Margin", f"{k['margin']:.1%}", "profit / revenue"),
+               ("Orders", f"{k['orders']:,}", _d(k['orders'], kp['orders'])),
+               ("Avg order value", f"${k['aov']:,.2f}", _d(k['aov'], kp['aov']))])
+    # ---------- Interactive trend chart ----------
+    freq = {"Daily": "D", "Weekly": "W", "Monthly": "ME"}[gran]
+    if len(d):
+        if metric_label == "Orders":
+            trend = (d.set_index("order_date").groupby([pd.Grouper(freq=freq)] + ([d[breakdown.lower()].rename(breakdown)] if breakdown != "Total" else []))["order_id"].nunique().rename("value").reset_index())
+        else:
+            keys = [pd.Grouper(key="order_date", freq=freq)] + ([breakdown.lower()] if breakdown != "Total" else [])
+            trend = d.groupby(keys)[metric_col].sum().rename("value").reset_index()
+        plot_fn = {"Area": px.area, "Line": px.line, "Bar": px.bar}[chart_type]
+        kwargs = dict(x="order_date", y="value", title=f"{metric_label} · {gran}" + (f" · by {breakdown}" if breakdown != "Total" else ""))
+        if breakdown != "Total": kwargs["color"] = breakdown.lower()
+        st.plotly_chart(C(plot_fn(trend, **kwargs), 380), use_container_width=True)
+    # ---------- Clickable category chart -> filters everything beneath it ----------
+    left, right = st.columns([1.25, 1])
+    clicked_cat = None
+    with left:
+        st.markdown("#### 🖱️ Click a category bar — the leaderboard & records below will filter to it")
+        if "cat_click_reset" not in st.session_state: st.session_state["cat_click_reset"] = 0
+        if len(d):
+            cat_df = d.groupby("category")[metric_col].sum().reset_index()
+            sel = st.plotly_chart(C(px.bar(cat_df, x="category", y=metric_col, color="category", title=f"{metric_label} by category — click a bar")), use_container_width=True,
+                                  on_select="rerun", key=f"cat_chart_{st.session_state['cat_click_reset']}")
+            try:
+                pts = sel.selection.points
+                if pts: clicked_cat = pts[0]["x"]
+            except Exception: pass
+        if clicked_cat:
+            st.success(f"Filtering below to: **{clicked_cat}**")
+            if st.button("↺ Clear category selection", key="clear_cat"):
+                st.session_state["cat_click_reset"] += 1; st.rerun()
+    with right:
+        st.markdown("#### 🗺️ Region mix (updates with every control)")
+        if len(d):
+            reg_df = d.groupby("region")[metric_col].sum().reset_index()
+            st.plotly_chart(C(px.pie(reg_df, names="region", values=metric_col, hole=.5, title=f"{metric_label} share by region"), 380), use_container_width=True)
+    dd = d[d.category == clicked_cat] if clicked_cat else d
+    # ---------- Product leaderboard with row selection ----------
+    st.markdown(f"#### 🏆 Product leaderboard{' — ' + clicked_cat if clicked_cat else ''} (select a row to inspect it)")
+    if len(dd):
+        prod = (dd.merge(products[["product_id", "product_name"]], on="product_id")
+                  .groupby(["product_name", "category"])
+                  .agg(revenue=("revenue", "sum"), profit=("profit", "sum"), units=("qty", "sum"), orders=("order_id", "nunique"), avg_discount=("discount", "mean"))
+                  .assign(margin=lambda x: x.profit / x.revenue).sort_values("revenue", ascending=False).head(top_n).reset_index())
+        ev = st.dataframe(prod, use_container_width=True, height=360, on_select="rerun", selection_mode="single-row", key="prod_table")
+        sel_rows = []
+        try: sel_rows = ev.selection.rows
+        except Exception: pass
+        if sel_rows:
+            r0 = prod.iloc[sel_rows[0]]
+            a, b, c_ = st.columns(3)
+            a.markdown(f"<div class='cx-card'><h4>📦 {r0.product_name}</h4><p>{r0.category} · revenue <b style='color:#fff'>${r0.revenue:,.0f}</b> · margin {r0.margin:.1%}</p></div>", unsafe_allow_html=True)
+            b.markdown(f"<div class='cx-card'><h4>🧾 Demand</h4><p>{int(r0.units):,} units across {int(r0.orders):,} orders · avg discount {r0.avg_discount:.1%}</p></div>", unsafe_allow_html=True)
+            with c_:
+                st.markdown("<div class='cx-card'><h4>➡️ Next step</h4><p>Test a price move for this product in the simulator.</p></div>", unsafe_allow_html=True)
+                st.button("💲 Open in Pricing Simulator →", key="go_pricing_sel", use_container_width=True, on_click=go, args=("Pricing & Profit Optimization",))
+        else:
+            st.caption("Tip: click any row above to see that product's detail card here.")
+        st.download_button("⬇ Download dashboard data (CSV, current filters + click selection)", dd.to_csv(index=False), "cortexora_dashboard_data.csv")
+    # ---------- Live insight cards ----------
+    if len(d):
+        by_cat = d.groupby("category").revenue.sum(); by_reg = d.groupby("region").revenue.sum()
+        low_margin = d.groupby("category").apply(lambda g: g.profit.sum() / g.revenue.sum() if g.revenue.sum() else 0).idxmin()
         ic = st.columns(3)
-        ic[0].markdown(f"<div class='cx-card'><h4>🏆 Top category</h4><p><b style='color:#fff'>{top_cat}</b> drives ${by_cat.max():,.0f} ({by_cat.max()/by_cat.sum():.0%} of in-scope revenue).</p></div>", unsafe_allow_html=True)
-        ic[1].markdown(f"<div class='cx-card'><h4>🗺️ Strongest region</h4><p><b style='color:#fff'>{top_reg}</b> leads with ${by_reg.max():,.0f} in revenue.</p></div>", unsafe_allow_html=True)
-        ic[2].markdown(f"<div class='cx-card'><h4>⚠️ Margin watch</h4><p><b style='color:#fff'>{low_margin}</b> has the thinnest margin in scope — see Pricing & Profit Optimization before discounting further.</p></div>", unsafe_allow_html=True)
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Performance trend", "🧩 Segments", "🔁 Period comparison", "🧠 Needs your decision"])
-    with tab1:
-        trend = f.groupby("order_date").agg(revenue=("revenue","sum"), profit=("profit","sum")).reset_index()
-        fig = px.area(trend, x="order_date", y="revenue", title="Revenue trend (actuals)")
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=10,r=10,t=40,b=10))
-        st.plotly_chart(fig, use_container_width=True)
-        st.plotly_chart(px.line(trend, x="order_date", y="profit", title="Profit trend (actuals)"), use_container_width=True)
-    with tab2:
-        a, b = st.columns(2)
-        a.plotly_chart(px.bar(f.groupby("category").agg(revenue=("revenue","sum"),profit=("profit","sum")).reset_index(), x="category", y=["revenue","profit"], barmode="group", title="Category"), use_container_width=True)
-        b.plotly_chart(px.pie(f.groupby("region").revenue.sum().reset_index(), names="region", values="revenue", hole=.45, title="Revenue share by region"), use_container_width=True)
-    with tab3:
-        st.dataframe(period_compare(f), use_container_width=True)
-        st.caption("Current 30 days vs the preceding 30 days, using the shared metric definitions (docs/03).")
-    with tab4:
-        with sqlite3.connect(DB_PATH) as con: dec = pd.read_sql("SELECT * FROM decisions WHERE status='pending' ORDER BY priority DESC LIMIT 5", con)
-        if len(dec):
-            st.dataframe(dec[["area","problem","action","priority"]], use_container_width=True)
-            st.button("Review & decide → Decision Engine", type="primary", on_click=go, args=("Decision Intelligence Engine",))
-        else: st.info("No pending recommendations — generate them in the Decision Intelligence Engine.")
+        ic[0].markdown(f"<div class='cx-card'><h4>🏆 Top category</h4><p><b style='color:#fff'>{by_cat.idxmax()}</b> · ${by_cat.max():,.0f} ({by_cat.max()/by_cat.sum():.0%} of scope)</p></div>", unsafe_allow_html=True)
+        ic[1].markdown(f"<div class='cx-card'><h4>🗺️ Strongest region</h4><p><b style='color:#fff'>{by_reg.idxmax()}</b> · ${by_reg.max():,.0f}</p></div>", unsafe_allow_html=True)
+        ic[2].markdown(f"<div class='cx-card'><h4>⚠️ Margin watch</h4><p><b style='color:#fff'>{low_margin}</b> is thinnest-margin in scope — check Pricing before discounting.</p></div>", unsafe_allow_html=True)
+    q1, q2, q3, q4 = st.columns(4)
+    q1.button("📈 Growth deep-dive →", use_container_width=True, on_click=go, args=("Business Growth",))
+    q2.button("🔮 Forecast →", use_container_width=True, on_click=go, args=("Demand Forecasting",))
+    q3.button("🧠 Decisions →", use_container_width=True, type="primary", on_click=go, args=("Decision Intelligence Engine",))
+    q4.button("📄 Export report →", use_container_width=True, on_click=go, args=("Reports",))
 
 elif page == "Business Growth":
     page_intro(); k = kpis(f); pcg = period_compare(f).set_index("metric")
