@@ -28,7 +28,7 @@ df = enrich(orders, items).merge(products[["product_id","category"]], on="produc
 
 # ================= Interactive navigation (grouped, searchable, stateful) =================
 NAV = [
-    ("OVERVIEW", [("🏠", "Home / Executive Overview")]),
+    ("OVERVIEW", [("🏠", "Home / Executive Overview"), ("📥", "Upload & Analyse Data")]),
     ("ANALYZE — what happened & why", [("📈", "Business Growth"), ("🎯", "Marketing Performance"), ("🥊", "Competitor Intelligence")]),
     ("PREDICT & OPTIMIZE — what next", [("🔮", "Demand Forecasting"), ("👥", "Customer Intelligence"), ("💲", "Pricing & Profit Optimization")]),
     ("DECIDE — what should we do", [("🤖", "AI Assistant"), ("🧠", "Decision Intelligence Engine"), ("🧪", "Experiments & Causal Lab")]),
@@ -39,6 +39,7 @@ PAGE_ICON = {pg: ic for _, items_ in NAV for ic, pg in items_}
 PAGE_SECTION = {pg: sec for sec, items_ in NAV for _, pg in items_}
 
 PAGE_META = {
+ "Upload & Analyse Data": ("Your data, analysed", "Upload a sales CSV — CORTEXORA validates it, analyses it and presents KPIs, trends, segments, products, customers and a forecast from YOUR data."),
  "Home / Executive Overview": ("Command centre", "What is happening, what is next, and what needs your decision — in one view."),
  "Business Growth": ("What happened? Why?", "Revenue, profit and segment drivers using the shared metric definitions."),
  "Marketing Performance": ("What happened? Why?", "Channel efficiency today, and where the next dollar of budget works hardest."),
@@ -371,6 +372,99 @@ if page == "Home / Executive Overview":
     qc.button("🔮 See the forecast →", key="home_fc", use_container_width=True, on_click=go, args=("Demand Forecasting",))
     qd.button("📄 Build a report →", key="home_rep", use_container_width=True, on_click=go, args=("Reports",))
 
+elif page == "Upload & Analyse Data":
+    page_intro()
+    from cortexora.pipelines.upload import guess_mapping, transform as upload_transform, REQUIRED as UP_REQUIRED
+    st.markdown("#### 1️⃣ Upload your sales file (CSV)")
+    st.caption("One row per sold item works best (like most retail exports). Don't have that format? Columns are auto-detected and you confirm them below — nothing is analysed until you say so.")
+    tmpl = pd.DataFrame(dict(order_id=[1001,1001,1002], order_date=["2024-01-03","2024-01-03","2024-01-10"], customer_id=[11,12,11],
+                             product_name=["Blue Mug","Dinner Plate","Blue Mug"], category=["Kitchen","Kitchen","Kitchen"],
+                             qty=[2,1,3], unit_price=[9.99,24.5,9.99], unit_cost=[4.2,11.0,4.2], region=["North","South","North"], channel=["Online","Store","Online"]))
+    st.download_button("⬇ Download the ideal-format template (CSV)", tmpl.to_csv(index=False), "cortexora_upload_template.csv")
+    up = st.file_uploader("Drop your CSV here", type=["csv"], key="user_csv")
+    raw = None
+    if up is not None:
+        try: raw = pd.read_csv(up)
+        except Exception:
+            up.seek(0); raw = pd.read_csv(up, encoding="latin-1")
+        st.success(f"Loaded **{up.name}** — {len(raw):,} rows × {len(raw.columns)} columns")
+        with st.expander("👀 Preview (first 10 rows)"): st.dataframe(raw.head(10), use_container_width=True)
+        st.markdown("#### 2️⃣ Confirm what each column means")
+        guessed = guess_mapping(list(raw.columns))
+        opts = ["— not in my file —"] + list(raw.columns)
+        fields = [("order_date","📅 Order date *"),("order_id","🧾 Order / invoice ID"),("customer_id","👤 Customer ID"),("product","📦 Product name/ID *"),
+                  ("category","🧩 Category"),("qty","🔢 Quantity *"),("unit_price","💲 Unit price *"),("discount","🏷️ Discount"),("unit_cost","🧮 Unit cost"),("region","🗺️ Region / country"),("channel","🛒 Channel")]
+        mapping, mc = {}, st.columns(3)
+        for i, (field, label) in enumerate(fields):
+            g = guessed.get(field); idx = opts.index(g) if g in opts else 0
+            sel = mc[i % 3].selectbox(label, opts, index=idx, key=f"map_{field}")
+            mapping[field] = None if sel.startswith("—") else sel
+        cost_ratio = 0.55
+        if not mapping.get("unit_cost"):
+            cost_ratio = st.slider("No cost column mapped → assume unit cost as % of price (profit/margin will be labelled an estimate)", 10, 90, 55, key="cost_ratio") / 100
+        if st.button("🚀 Analyse my dataset", type="primary", key="analyse_btn"):
+            try:
+                frames, rep = upload_transform(raw, mapping, cost_ratio)
+                st.session_state["up_frames"], st.session_state["up_report"] = frames, rep
+                st.session_state["up_df"] = enrich(frames["orders"], frames["order_items"]).merge(frames["products"][["product_id","category","product_name"]], on="product_id")
+                st.rerun()
+            except ValueError as e: st.error(f"Couldn't analyse that file: {e}")
+    if "up_df" in st.session_state:
+        udf, rep, uframes = st.session_state["up_df"], st.session_state["up_report"], st.session_state["up_frames"]
+        st.markdown("## 📊 Your dataset — analysis")
+        st.success(f"Analysed {rep['rows_used']:,} usable rows ({rep['orders']:,} orders · {rep['products']} products · {rep['customers']:,} customers) from {rep['date_min']} to {rep['date_max']}.")
+        if rep["rows_dropped"]: st.warning(f"{rep['rows_dropped']:,} row(s) were dropped because dates/quantities/prices couldn't be parsed — counted here, never silently.")
+        if rep["returns_rows"]: st.info(f"{rep['returns_rows']:,} row(s) have negative quantity (returns) — kept, so revenue is net of returns.")
+        if rep["cost_is_assumption"]: st.warning(f"⚠️ No cost column: profit & margin below assume unit cost = {rep['cost_ratio']:.0%} of price. Treat them as estimates, not accounting profit.")
+        uk = kpis(udf)
+        kpi_cards([("Revenue", f"${uk['revenue']:,.0f}", f"{rep['date_min']} → {rep['date_max']}"), ("Profit" + (" (est.)" if rep['cost_is_assumption'] else ""), f"${uk['profit']:,.0f}", "after product cost" + (" assumption" if rep['cost_is_assumption'] else "")), ("Margin", f"{uk['margin']:.1%}", "profit / revenue"), ("Orders", f"{uk['orders']:,}", f"AOV ${uk['aov']:,.2f}"), ("Customers", f"{uk['customers']:,}", f"{int(uk['units']):,} units")])
+        ut1, ut2, ut3, ut4 = st.tabs(["📈 Trend", "🧩 Segments", "🏆 Products & customers", "🔮 Forecast"])
+        with ut1:
+            gm = st.selectbox("Trend metric", ["revenue","profit","qty"], key="up_metric"); gf = st.selectbox("Granularity", ["W","ME","D"], format_func=lambda x: {"W":"Weekly","ME":"Monthly","D":"Daily"}[x], key="up_gran")
+            tr = udf.set_index("order_date").resample(gf)[gm].sum().reset_index()
+            st.plotly_chart(C(px.area(tr, x="order_date", y=gm, title=f"Your {gm} over time"), 380), use_container_width=True)
+        with ut2:
+            a, b, c_ = st.columns(3)
+            a.plotly_chart(C(px.bar(udf.groupby("category").revenue.sum().reset_index(), x="category", y="revenue", title="Revenue by category")), use_container_width=True)
+            b.plotly_chart(C(px.bar(udf.groupby("region").revenue.sum().reset_index(), x="region", y="revenue", title="Revenue by region")), use_container_width=True)
+            c_.plotly_chart(C(px.bar(udf.groupby("channel").revenue.sum().reset_index(), x="channel", y="revenue", title="Revenue by channel")), use_container_width=True)
+            st.dataframe(udf.groupby("category").agg(revenue=("revenue","sum"), profit=("profit","sum"), orders=("order_id","nunique"), units=("qty","sum")).assign(margin=lambda x: x.profit/x.revenue).sort_values("revenue", ascending=False), use_container_width=True)
+        with ut3:
+            a, b = st.columns(2)
+            top_p = udf.groupby("product_name").agg(revenue=("revenue","sum"), units=("qty","sum"), orders=("order_id","nunique")).sort_values("revenue", ascending=False).head(15)
+            a.dataframe(top_p, use_container_width=True); a.plotly_chart(C(px.bar(top_p.reset_index(), x="product_name", y="revenue", title="Top 15 products by revenue")), use_container_width=True)
+            if udf.customer_id.nunique() > 1:
+                top_c = udf.groupby("customer_id").agg(revenue=("revenue","sum"), orders=("order_id","nunique"), last_order=("order_date","max")).sort_values("revenue", ascending=False).head(15)
+                b.dataframe(top_c, use_container_width=True); b.caption("Top customers by revenue. Full RFM/churn analysis activates when this dataset is loaded as the warehouse (below).")
+            else: b.info("No customer column mapped — customer analysis unavailable for this file.")
+        with ut4:
+            from cortexora.models.forecasting import weekly_series, forecast_next, evaluate as fc_evaluate
+            cats_ = sorted(udf.category.unique()); fcat = st.selectbox("Forecast category", cats_, key="up_fcat")
+            try:
+                ws = weekly_series(udf, fcat, uframes["products"])
+                if len(ws) >= 24:
+                    ev = fc_evaluate(ws); fc = forecast_next(ws, 8)
+                    st.write(f"Hold-out accuracy: model WAPE **{ev['moving_average_4w']['WAPE']:.1%}** vs seasonal-naive **{ev['seasonal_naive']['WAPE']:.1%}** (chronological split — judge the forecast by this).")
+                    hist = ws.reset_index(); hist.columns = ["week","value"]
+                    st.plotly_chart(C(px.line(pd.concat([hist.tail(26).assign(kind="actual"), fc.rename(columns={"forecast":"value"})[["week","value"]].assign(kind="forecast")]), x="week", y="value", color="kind", title=f"{fcat}: history + 8-week forecast"), 360), use_container_width=True)
+                    st.dataframe(fc.assign(week=fc.week.dt.date), use_container_width=True)
+                else: st.info(f"Only {len(ws)} weekly periods for {fcat} — at least ~24 are needed for a forecast with an honest hold-out evaluation. Trend and segment analysis above still apply.")
+            except Exception as e: st.info(f"Forecast unavailable for this selection: {e}")
+        st.markdown("#### 💾 Keep this dataset in CORTEXORA")
+        st.caption("Downloads give you the cleaned, CORTEXORA-format tables. Loading replaces the demo warehouse (decisions/audit history are preserved); inventory stock is unknown for uploads (set to 0) and marketing modules stay inactive without spend data.")
+        dl = st.columns(3)
+        for i, tname in enumerate(["orders","order_items","products"]):
+            dl[i].download_button(f"⬇ Cleaned {tname}.csv", uframes[tname].to_csv(index=False), f"{tname}.csv", key=f"dl_{tname}")
+        confirm = st.checkbox("I understand this replaces the current demo warehouse data", key="up_confirm")
+        if st.button("🏭 Load my dataset as the CORTEXORA warehouse", key="load_wh", disabled=not confirm):
+            from cortexora.pipelines.etl import run as etl_run
+            from cortexora.config import ROOT
+            dest = ROOT / "data" / "uploaded" / "current"; dest.mkdir(parents=True, exist_ok=True)
+            for tname, frame in uframes.items(): frame.to_csv(dest / f"{tname}.csv", index=False)
+            etl_run(dest, DB_PATH); st.cache_resource.clear()
+            st.success("Your dataset is now the live warehouse — every module (Home, Growth, Customer, Decisions…) is analysing YOUR data. Use the sidebar to explore.")
+            st.button("🏠 Go to my dashboard →", key="up_go_home", type="primary", on_click=go, args=("Home / Executive Overview",))
+
 elif page == "Business Growth":
     page_intro(); k = kpis(f); pcg = period_compare(f).set_index("metric")
     kpi_cards([("Revenue", f"${k['revenue']:,.0f}", delta_html(pcg.loc['revenue','change_pct'])),
@@ -489,7 +583,10 @@ elif page == "Customer Intelligence":
             st.caption("Act human-first: review before contacting anyone. A prediction is a prioritisation aid, not a verdict on a customer.")
     except ValueError as e: st.error(str(e))
 elif page == "Marketing Performance":
-    page_intro(); st.caption("CAC is a spend/conversions proxy. ROAS is not shown: no attribution join exists in this data — attributed ≠ incremental.")
+    page_intro()
+    if mkt.empty:
+        st.warning("No marketing spend data in the current warehouse (e.g. the loaded dataset had none). Marketing analytics, CAC and the budget optimiser activate when marketing_spend data is loaded via the ETL."); st.stop()
+    st.caption("CAC is a spend/conversions proxy. ROAS is not shown: no attribution join exists in this data — attributed ≠ incremental.")
     mm = marketing_metrics(mkt)
     kpi_cards([("Total spend", f"${mm.spend.sum():,.0f}", f"{mkt.spend_date.nunique()} weekly flights"), ("Conversions", f"{mm.conversions.sum():,}", "all channels"), ("Blended CAC (proxy)", f"${mm.spend.sum()/max(mm.conversions.sum(),1):,.2f}", "spend / conversion"), ("Best CAC channel", str(mm.loc[mm.cac_proxy.idxmin(),'channel']), f"${mm.cac_proxy.min():,.2f} per conversion")])
     mt1, mt2, mt3 = st.tabs(["📊 Channels", "🎯 Budget optimizer", "🧪 MMM readiness gate"])

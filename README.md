@@ -11,6 +11,9 @@ Raw transactions flow through a validated ETL into a SQLite warehouse; a single 
 
 > ⚠️ **Data honesty:** everything currently runs on clearly-labelled **synthetic demo data** (deterministic, seed=42). No figure in this project is presented as a real business result. The architecture, tests and methods are the deliverable; swap in a licensed real dataset via the same pipeline (see `docs/04_DATASET_STRATEGY.md`).
 
+## Bring your own data
+In the app: **📥 Upload & Analyse Data** (sidebar) — drop a sales CSV, confirm the auto-detected column mapping, and CORTEXORA analyses and presents *your* data (KPIs, trends, segments, top products/customers, forecast), with the option to load it as the live warehouse. See `docs/14_UPLOAD_AND_ANALYSE.md`.
+
 ## Quickstart
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
