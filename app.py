@@ -8,6 +8,9 @@ from cortexora.analytics.metrics import enrich, kpis, period_compare, marketing_
 from cortexora.models.forecasting import weekly_series, evaluate, forecast_next, rfm
 from cortexora.decision_engine.engine import stockout_recommendations, churn_recommendations, inventory_recommendations, budget_recommendation, discount_recommendation, persist, set_status
 from cortexora.optimization.optimize import reorder_plan, daily_demand_stats, discount_effectiveness, breakeven_units, optimize_budget
+from cortexora.analytics.experiments import ab_conversion, required_sample_size, srm_check, diff_in_diff, mmm_readiness
+from cortexora.analytics.competitor import validate_snapshots, price_gaps
+import numpy as np
 
 st.set_page_config(page_title="CORTEXORA", layout="wide")
 if not DB_PATH.exists():
@@ -16,7 +19,7 @@ orders, items, products, inv, mkt = (load_table(t) for t in ["orders","order_ite
 df = enrich(orders, items).merge(products[["product_id","category"]], on="product_id")
 
 st.sidebar.title("🧠 CORTEXORA")
-page = st.sidebar.radio("Module", ["Home / Executive Overview","Business Growth","Demand Forecasting","Pricing Simulator","Customer Intelligence","Marketing Performance","Decision Intelligence Engine","Data Quality & Monitoring"])
+page = st.sidebar.radio("Module", ["Home / Executive Overview","Business Growth","Demand Forecasting","Pricing Simulator","Customer Intelligence","Marketing Performance","Experiments & Causal Lab","Competitor Intelligence","Decision Intelligence Engine","Data Quality & Monitoring"])
 st.sidebar.warning("⚠️ Synthetic demo data (seed=42) — not real business results.")
 cats = st.sidebar.multiselect("Category", sorted(df.category.unique()), default=sorted(df.category.unique()))
 dmin, dmax = st.sidebar.date_input("Date range", [df.order_date.min().date(), df.order_date.max().date()])
@@ -108,6 +111,62 @@ elif page == "Marketing Performance":
         st.metric("Expected conversions change vs current shares (same budget)", f"{opt['expected_gain_pct']:+.1f}%")
         comp = pd.DataFrame({"channel": list(opt["allocation"]), "current": [opt["current_allocation"][c] for c in opt["allocation"]], "optimized": list(opt["allocation"].values())})
         st.plotly_chart(px.bar(comp, x="channel", y=["current","optimized"], barmode="group"), use_container_width=True)
+    st.subheader("Marketing Mix Modelling — readiness gate")
+    gate = mmm_readiness(mkt, has_revenue_outcome=False); st.dataframe(gate, use_container_width=True)
+    if gate.Met.all(): st.success("All checks pass — MMM fitting is enabled.")
+    else: st.warning("MMM is NOT fitted: the checks above fail. An unidentifiable model shown confidently is worse than no model. Needed: a revenue outcome joinable to weekly channel spend, plus external controls (price/promo/seasonality). The budget optimizer above is a simpler, honestly-labelled alternative on this data.")
+
+elif page == "Experiments & Causal Lab":
+    st.title("Causal Inference & Experimentation Lab")
+    st.caption("Causal claims require a causal design. Randomised A/B test → effect + uncertainty. No randomisation → no causal claim from this page.")
+    st.subheader("A/B test analyser (conversion)")
+    c1, c2 = st.columns(2)
+    with c1: n_t = st.number_input("Treatment visitors", 1, value=1200); cv_t = st.number_input("Treatment conversions", 0, value=156)
+    with c2: n_c = st.number_input("Control visitors", 1, value=1200); cv_c = st.number_input("Control conversions", 0, value=132)
+    try:
+        r = ab_conversion(int(n_t), int(cv_t), int(n_c), int(cv_c)); s = srm_check(int(n_t), int(n_c))
+        m = st.columns(4); m[0].metric("Control rate", f"{r['rate_ctrl']:.2%}"); m[1].metric("Treatment rate", f"{r['rate_treat']:.2%}")
+        m[2].metric("Absolute effect", f"{r['abs_effect']:+.2%}", f"{r['rel_effect_pct']:+.1f}% relative"); m[3].metric("p-value", f"{r['p_value']:.4f}")
+        st.write(f"95% CI for the effect: [{r['ci_low']:+.2%}, {r['ci_high']:+.2%}] · Cohen's h = {r['cohens_h']:.3f} · "
+                 + ("**Statistically significant** at 5% — still check practical significance and novelty effects before shipping." if r["significant"] else "**Not significant** — the data do not rule out zero effect; do not ship on this evidence."))
+        if s["srm_suspected"]: st.error(f"⚠️ SRM suspected (split {s['observed_share']:.1%} vs intended {s['expected_share']:.0%}, p={s['p_value']:.4f}): randomisation may be broken — investigate before trusting any result.")
+    except ValueError as e: st.error(str(e))
+    st.subheader("Design guidance — required sample size")
+    base = st.slider("Baseline conversion rate", 0.01, 0.50, 0.11); mde = st.slider("Minimum detectable effect (absolute)", 0.005, 0.05, 0.02, step=0.005)
+    st.write(f"You need ≈ **{required_sample_size(base, mde):,} visitors per group** (α=0.05, power=0.80). Fix this *before* launching; peeking and stopping early inflates false positives.")
+    st.subheader("Difference-in-differences (quasi-experiment) — synthetic demo")
+    st.caption("Demo data with a known +8 effect, generated in-page and labelled as such. DiD is causal ONLY under parallel trends.")
+    rng = np.random.default_rng(0); rows = []
+    for unit in range(60):
+        tr = int(unit < 30); b = rng.normal(100, 5)
+        for post_ in (0,1): rows.append(dict(y=b + 10*post_ + (8 if tr and post_ else 0) + rng.normal(0,2), treated=tr, post=post_))
+    d = diff_in_diff(pd.DataFrame(rows))
+    st.write(f"DiD estimate: **{d['did_effect']:+.2f}** (95% CI [{d['ci_low']:.2f}, {d['ci_high']:.2f}], p={d['p_value']:.4f}) · pre-period level gap = {d['pre_period_gap']:.2f} (a large gap warns parallel trends may fail)")
+
+elif page == "Competitor Intelligence":
+    st.title("Competitor & Market Intelligence Radar")
+    st.warning("No live competitor feed is connected. This page analyses snapshots YOU supply (compliantly collected public prices with source + timestamp) — it does not scrape or simulate a live feed.")
+    template = pd.DataFrame(dict(product_id=[1,2], competitor=["RivalCo","RivalCo"], competitor_price=[99.0,49.0],
+                                 observed_at=["2026-10-01","2026-10-01"], source_url=["https://example.com/p1","https://example.com/p2"]))
+    st.download_button("Download snapshot template CSV", template.to_csv(index=False), "competitor_template.csv")
+    src = st.radio("Snapshot source", ["Load clearly-labelled example", "Upload my CSV"])
+    snap = None
+    if src.startswith("Load"):
+        snap = template.copy(); snap["competitor_price"] = [products.list_price.iloc[0]*0.85, products.list_price.iloc[1]*1.05]; st.info("Example snapshot (illustrative values derived from our own list prices) — not real competitor data.")
+    else:
+        up = st.file_uploader("Competitor snapshot CSV", type="csv")
+        if up is not None:
+            try: snap = pd.read_csv(up)
+            except Exception as e: st.error(f"Could not read CSV: {e}")
+    if snap is not None:
+        try:
+            gaps = price_gaps(validate_snapshots(snap, products.product_id), products)
+            st.dataframe(gaps, use_container_width=True)
+            alerts = gaps[gaps.alert]
+            st.metric("Undercut alerts (competitor ≥5% cheaper)", len(alerts))
+            for a in alerts.itertuples(): st.error(f"⚠️ {a.competitor} undercuts {a.product_name} by {abs(a.gap_pct):.1f}% (theirs ${a.competitor_price:.2f} vs ours ${a.list_price:.2f}, observed {a.observed_at}, source: {a.source_url})")
+            st.download_button("Download comparison report CSV", gaps.to_csv(index=False), "competitor_report.csv")
+        except ValueError as e: st.error(f"Invalid snapshot: {e}")
 
 elif page == "Decision Intelligence Engine":
     st.title("Decision Intelligence Engine")

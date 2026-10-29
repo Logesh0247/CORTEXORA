@@ -4,7 +4,7 @@
 - **P3 Core BI (done):** KPI/trend/category/region, period comparison, drill-down table + CSV download. ✅ metrics match hand-calculated test fixture.
 - **P4 Predictive (done, on synthetic data):** weekly forecast vs seasonal-naive with WAPE; RFM; **validated churn classifier** (`cortexora/models/churn.py`, leakage-tested, baseline-compared, `docs/06_MODEL_CARD_CHURN.md`). ⏳ retrain on real data; RetainIQ review if repo provided.
 - **P5 Optimization (done):** forecast-based reorder plan (95% service level), discount-effectiveness, break-even, constrained marketing budget optimizer (fitted power response curves, reliability-gated) — all feeding the Decision Engine (`docs/07_PHASE5_OPTIMIZATION.md`).
-- **P6 Advanced:** MMM/causal/competitor — **gated on real data**; UI states unavailability honestly rather than faking.
+- **P6 Advanced (done):** Experimentation & Causal Lab (A/B + SRM + sample-size + DiD, known-effect-tested), Competitor Intelligence via validated user snapshots (no fake live feed), MMM **readiness gate** — fitting stays disabled until a joinable revenue outcome + controls exist (`docs/08_PHASE6_ADVANCED_ANALYTICS.md`).
 - **P7 Decision Engine (done, rule-based v1):** detectors, priority = impact×confidence×urgency (formula in code+UI), approve/reject/defer persisted. ⏳ outcome-vs-expected tracking after follow-up period.
 - **P8 Monitoring (partial):** data-quality page. ⏳ drift (PSI) + model-performance tracking.
 - **P9–10 Polish/Deploy:** screenshots, model cards, Streamlit Cloud config.
